@@ -163,7 +163,7 @@
 <div id="dropzone">
   <div class="big">📄</div>
   Dra och släpp textfiler här (txt, md, csv, html, json, kod …)<br>
-  eller klicka för att välja filer. PDF stöds inte ännu — spara som .txt
+  eller klicka för att välja filer. PDF:er är OK — texten extraheras automatiskt.
 </div>
 <input type="file" id="filepicker" multiple>
 <div class="urlrow">
@@ -269,14 +269,35 @@ async function refreshLibrary() {
   } catch {}
 }
 
+function bufToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 8192) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  }
+  return btoa(bin);
+}
+
+function isPdf(f) {
+  return f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+}
+
 async function addFiles(files) {
   for (const f of files) {
     try {
-      const content = await f.text();
-      const r = await fetch("/api/library/file", {
+      let endpoint, payload;
+      if (isPdf(f)) {
+        endpoint = "/api/library/pdf";
+        payload = { name: f.name, data: bufToBase64(await f.arrayBuffer()) };
+        libNote(`Extraherar text ur ${f.name} …`, false);
+      } else {
+        endpoint = "/api/library/file";
+        payload = { name: f.name, content: await f.text() };
+      }
+      const r = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: f.name, content }),
+        body: JSON.stringify(payload),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "HTTP " + r.status);

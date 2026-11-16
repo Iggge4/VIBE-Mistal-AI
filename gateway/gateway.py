@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
+import base64
 import hashlib
 import json
 import mimetypes
 import os
 import re
+import shutil
 import ssl
+import subprocess
 import sys
 import threading
 import time
@@ -34,6 +37,8 @@ MAX_CONTEXT_CHARS = int(os.environ.get("VIBE_MAX_CONTEXT_CHARS", "12000"))
 CHUNK_CHARS = 900
 MAX_CHUNKS = 12
 MAX_DOC_CHARS = 2_000_000
+MAX_PDF_BYTES = 20_000_000
+PDFTOTEXT = os.environ.get("VIBE_PDFTOTEXT") or shutil.which("pdftotext")
 
 HOP_HEADERS = {
     "connection",
@@ -262,6 +267,23 @@ def fetch_url_text(url):
     if "html" in ctype or b"<html" in head or b"<!doctype" in head:
         return extract_html_text(data)
     return data.decode("utf-8", errors="replace")
+
+
+def pdf_to_text(data):
+    if not PDFTOTEXT:
+        raise RuntimeError("pdftotext saknas i systemet")
+    try:
+        proc = subprocess.run(
+            [PDFTOTEXT, "-", "-"],
+            input=data,
+            capture_output=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("PDF-konverteringen tog för lång tid")
+    if proc.returncode != 0:
+        raise RuntimeError("pdftotext fel: %s" % proc.stderr.decode(errors="replace")[:200])
+    return proc.stdout.decode("utf-8", errors="replace")
 
 
 def _query_terms(text):
@@ -527,7 +549,7 @@ class AdminHandler(BaseHTTPRequestHandler):
         content = str(data["content"])
         if content.startswith("%PDF") or "\x00" in content[:4096]:
             self._send_json(
-                {"error": "PDF och binära filer stöds inte ännu — spara som .txt eller kopiera in texten"},
+                {"error": "binärfil kan inte läsas som text — PDF:er hanteras automatiskt, övriga spara som .txt"},
                 400,
             )
             return
@@ -535,6 +557,36 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "för stor fil (max 2 MB text)"}, 400)
             return
         entry = library_add(str(data["name"]), "fil", content)
+        self._send_json({"ok": True, "doc": entry})
+
+    def _lib_add_pdf(self):
+        data = self._read_json_body()
+        if not data or not data.get("name") or not data.get("data"):
+            self._send_json({"error": "namn och fildata krävs"}, 400)
+            return
+        try:
+            raw = base64.b64decode(data["data"], validate=True)
+        except Exception:
+            self._send_json({"error": "ogiltig fildata"}, 400)
+            return
+        if not raw.startswith(b"%PDF"):
+            self._send_json({"error": "filen är ingen giltig PDF"}, 400)
+            return
+        if len(raw) > MAX_PDF_BYTES:
+            self._send_json({"error": "för stor PDF (max 20 MB)"}, 400)
+            return
+        try:
+            text = pdf_to_text(raw)
+        except Exception as exc:
+            self._send_json({"error": "kunde inte läsa PDF:en: %s" % exc}, 400)
+            return
+        if not text.strip():
+            self._send_json(
+                {"error": "ingen text kunde extraheras — kan vara en skannad bild-PDF (OCR stöds inte)"},
+                400,
+            )
+            return
+        entry = library_add(str(data["name"]), "PDF", text)
         self._send_json({"ok": True, "doc": entry})
 
     def _lib_add_url(self):
@@ -563,6 +615,8 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": ok})
         elif path == "api/library/file":
             self._lib_add_file()
+        elif path == "api/library/pdf":
+            self._lib_add_pdf()
         elif path == "api/library/url":
             self._lib_add_url()
         else:

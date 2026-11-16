@@ -146,7 +146,9 @@ på värddatorn lägger in kunskapsdokument som AI:n kan använda:
 - **Internetadresser:** klistra in en URL och klicka **Lägg till**.
   Sidans *text* kopieras ut (HTML-taggar, script och stilar tas bort) —
   inget laddas ned och sidan läses bara en gång.
-- **PDF stöds inte ännu** — spara som .txt eller kopiera in texten.
+- **PDF stöds:** släpp en PDF så extraherar gatewayen texten själv
+  (popplers `pdftotext` ingår i snapet). Skannade bild-PDF:er utan
+  textlager fungerar inte (ingen OCR).
 - **Sök i hela dokumentet:** även långa dokument (t.ex. hela SoldF)
   fungerar. Gatewayen delar upp dokumentet i stycken och skickar
   automatiskt de utdrag som bäst matchar frågan — inte bara början.
