@@ -332,6 +332,11 @@ async function ask(question) {
     chat.scrollTop = chat.scrollHeight;
   }
   const bubble = addMsg("ai", "Väntar på godkännande från värddatorn…", true);
+  const thinkTimer = setTimeout(() => {
+    if (bubble.classList.contains("loading")) {
+      bubble.textContent = "Modellen tänker… frågor med bibliotek kan ta upp till en minut (CPU).";
+    }
+  }, 8000);
   send.disabled = true;
   try {
     const r = await fetch("/v1/chat/completions", {
@@ -348,6 +353,7 @@ async function ask(question) {
     const data = await r.json();
     if (!r.ok) throw new Error(data?.error?.message || ("HTTP " + r.status));
     const answer = data.choices?.[0]?.message?.content?.trim() || "(tomt svar)";
+    clearTimeout(thinkTimer);
     bubble.textContent = answer;
     bubble.classList.remove("loading");
     history.push({ role: "assistant", content: answer });
@@ -360,6 +366,7 @@ async function ask(question) {
     } else {
       bubble.textContent = "Fel: " + msg;
     }
+    clearTimeout(thinkTimer);
     bubble.classList.remove("loading");
   }
   send.disabled = false;

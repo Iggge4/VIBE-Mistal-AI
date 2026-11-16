@@ -17,9 +17,17 @@ if [ ! -f "$MODEL" ]; then
     exit 1
 fi
 
+THREADS="${VIBE_THREADS:-}"
+if [ -z "$THREADS" ]; then
+    THREADS=$(lscpu -p=Core 2>/dev/null | grep -v '^#' | sort -u | wc -l)
+    if ! [ "$THREADS" -ge 1 ] 2>/dev/null; then
+        THREADS=$(nproc)
+    fi
+fi
+
 exec "$SERVER" \
     -m "$MODEL" \
     --host 127.0.0.1 \
     --port 8080 \
     -c "${VIBE_CTX:-8192}" \
-    -t "$(nproc)"
+    -t "$THREADS"
