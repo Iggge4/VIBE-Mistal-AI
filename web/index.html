@@ -127,6 +127,16 @@
   }
   #libpanel label .c { color: var(--muted); font-size: 0.75rem; }
   #libpanel .none { color: var(--muted); font-size: 0.85rem; font-style: italic; }
+  .note-msg {
+    align-self: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    background: var(--panel);
+    border: 1px solid #2a2e3d;
+    border-radius: 10px;
+    padding: 6px 12px;
+    max-width: 90%;
+  }
 </style>
 </head>
 <body>
@@ -178,6 +188,11 @@ async function refreshLibrary() {
     liblist.innerHTML = docs.map(d =>
       `<label><input type="checkbox" value="${d.id}"> ${d.name} <span class="c">(${d.chars} tecken)</span></label>`
     ).join("");
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem("vibe_lib_sel") || "[]"); } catch {}
+    liblist.querySelectorAll("input").forEach(cb => {
+      if (saved.includes(cb.value)) cb.checked = true;
+    });
   } catch {
     liblist.innerHTML = '<span class="none">Kunde inte läsa biblioteket.</span>';
   }
@@ -188,7 +203,10 @@ libtoggle.addEventListener("click", () => {
   libpanel.classList.toggle("open");
   if (libpanel.classList.contains("open")) refreshLibrary();
 });
-liblist.addEventListener("change", updateLibLabel);
+liblist.addEventListener("change", () => {
+  updateLibLabel();
+  try { localStorage.setItem("vibe_lib_sel", JSON.stringify(selectedLibIds())); } catch {}
+});
 
 const history = [];
 const SYSTEM_PROMPT = "Du är en hjälpsam AI-assistent. Svara på samma språk som användaren skriver.";
@@ -213,8 +231,22 @@ async function checkHealth() {
   }
 }
 
+function libNames() {
+  return [...liblist.querySelectorAll("input:checked")].map(
+    cb => cb.textContent.trim().split(" (")[0]
+  );
+}
+
 async function ask(question) {
   history.push({ role: "user", content: question });
+  const sel = selectedLibIds();
+  if (sel.length) {
+    const note = document.createElement("div");
+    note.className = "note-msg";
+    note.textContent = "📚 Skickar med bibliotek: " + libNames().join(", ");
+    chat.appendChild(note);
+    chat.scrollTop = chat.scrollHeight;
+  }
   const bubble = addMsg("ai", "Väntar på godkännande från värddatorn…", true);
   send.disabled = true;
   try {
@@ -225,7 +257,7 @@ async function ask(question) {
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...history],
         max_tokens: 1024,
         stream: false,
-        library: selectedLibIds(),
+        library: sel,
       }),
     });
     const data = await r.json();

@@ -416,6 +416,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     break
         terms = _query_terms(question)
         selected, truncated = _select_chunks(docs, terms)
+        sys.stderr.write(
+            "[gateway] bibliotek: %d dokument valda, %d utdrag skickade (%d tecken)%s\n"
+            % (len(docs), len(selected), sum(len(c) for _, c in selected),
+               " (avkortat)" if truncated else "")
+        )
 
         by_doc = {}
         for meta, chunk in selected:
