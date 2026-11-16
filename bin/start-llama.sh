@@ -9,6 +9,8 @@ if [ ! -x "$SERVER" ]; then
     SERVER="$(dirname "$(readlink -f "$0")")/../llama-server"
 fi
 
+export LD_LIBRARY_PATH="$SNAP/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 if [ ! -f "$MODEL" ]; then
     echo "[llamaserver] Modellen saknas: $MODEL" >&2
     echo "[llamaserver] Kör: sudo snap run vibe-mistral-ai.setup-model" >&2
