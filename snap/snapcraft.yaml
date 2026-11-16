@@ -11,6 +11,7 @@ description: |
   automatiskt vid installation av snap-paketet.
 confinement: classic
 grade: stable
+icon: snap/gui/icon.svg
 
 apps:
   llamaserver:
@@ -23,6 +24,8 @@ apps:
     command: bin/setup-model.sh
   ask:
     command: bin/mistral-ask.sh
+  ui:
+    command: bin/open-ui.sh
 
 parts:
   llama-cpp:
@@ -46,5 +49,6 @@ parts:
       app:
         - bin/*
         - gateway/*
+        - web/*
     stage:
       - $app

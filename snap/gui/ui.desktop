@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=VIBE Mistral AI
+Comment=Chatta med din lokala Mistral AI
+Exec=vibe-mistral-ai.ui
+Icon=vibe-mistral-ai_icon
+Terminal=false
+Categories=Network;Chat;Science;
+Keywords=ai;chat;mistral;llm;

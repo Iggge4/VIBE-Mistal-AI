@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIBE Mistral AI</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --accent: #ff7000;
+    --text: #e8e8ee;
+    --muted: #8a8fa3;
+    --user-bubble: #2b3040;
+    --ai-bubble: #232735;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid #2a2e3d;
+  }
+  header img { width: 32px; height: 32px; }
+  header h1 { font-size: 1.05rem; font-weight: 600; }
+  header .status {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  header .status.ok { color: #4ade80; }
+  header .status.err { color: #f87171; }
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg {
+    max-width: 78%;
+    padding: 12px 16px;
+    border-radius: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bubble);
+    border-bottom-right-radius: 4px;
+  }
+  .msg.ai {
+    align-self: flex-start;
+    background: var(--ai-bubble);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.ai.loading { color: var(--muted); font-style: italic; }
+  #form {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px;
+    background: var(--panel);
+    border-top: 1px solid #2a2e3d;
+  }
+  #input {
+    flex: 1;
+    background: #14161f;
+    border: 1px solid #2a2e3d;
+    border-radius: 10px;
+    color: var(--text);
+    padding: 12px 14px;
+    font-size: 1rem;
+    resize: none;
+    font-family: inherit;
+  }
+  #input:focus { outline: none; border-color: var(--accent); }
+  #send {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0 22px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #send:disabled { opacity: 0.5; cursor: default; }
+  #clear {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid #2a2e3d;
+    border-radius: 10px;
+    padding: 0 14px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  #clear:hover { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <img src="/icon.svg" alt="VIBE Mistral AI">
+  <h1>VIBE Mistral AI</h1>
+  <span class="status" id="status">Kontrollerar anslutning&hellip;</span>
+</header>
+<div id="chat">
+  <div class="msg ai">Hej! Jag är din lokala Mistral AI. Ställ en fråga för att börja.</div>
+</div>
+<form id="form">
+  <button type="button" id="clear" title="Rensa konversationen">Rensa</button>
+  <textarea id="input" rows="1" placeholder="Skriv ett meddelande&hellip;" autofocus></textarea>
+  <button type="submit" id="send">Skicka</button>
+</form>
+<script>
+const chat = document.getElementById("chat");
+const form = document.getElementById("form");
+const input = document.getElementById("input");
+const send = document.getElementById("send");
+const clearBtn = document.getElementById("clear");
+const statusEl = document.getElementById("status");
+
+const history = [];
+const SYSTEM_PROMPT = "Du är en hjälpsam AI-assistent. Svara på samma språk som användaren skriver.";
+
+function addMsg(role, text, loading) {
+  const div = document.createElement("div");
+  div.className = "msg " + (role === "user" ? "user" : "ai") + (loading ? " loading" : "");
+  div.textContent = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+async function checkHealth() {
+  try {
+    const r = await fetch("/health");
+    statusEl.textContent = r.ok ? "Ansluten" : "Fel (" + r.status + ")";
+    statusEl.className = "status " + (r.ok ? "ok" : "err");
+  } catch {
+    statusEl.textContent = "Ingen anslutning";
+    statusEl.className = "status err";
+  }
+}
+
+async function ask(question) {
+  history.push({ role: "user", content: question });
+  const bubble = addMsg("ai", "Tänker…", true);
+  send.disabled = true;
+  try {
+    const r = await fetch("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...history],
+        max_tokens: 1024,
+        stream: false,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error?.message || ("HTTP " + r.status));
+    const answer = data.choices?.[0]?.message?.content?.trim() || "(tomt svar)";
+    bubble.textContent = answer;
+    bubble.classList.remove("loading");
+    history.push({ role: "assistant", content: answer });
+  } catch (err) {
+    bubble.textContent = "Fel: " + err.message;
+    bubble.classList.remove("loading");
+  }
+  send.disabled = false;
+  input.focus();
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text || send.disabled) return;
+  input.value = "";
+  addMsg("user", text);
+  ask(text);
+});
+
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+clearBtn.addEventListener("click", () => {
+  history.length = 0;
+  chat.innerHTML = "";
+  addMsg("ai", "Konversationen rensad. Vad vill du veta?");
+});
+
+checkHealth();
+setInterval(checkHealth, 30000);
+</script>
+</body>
+</html>

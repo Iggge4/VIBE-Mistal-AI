@@ -67,6 +67,23 @@ kopierar man certet till klienten och använder:
 curl --cacert cert.pem https://<serverns-ip>:8443/v1/chat/completions ...
 ```
 
+**Web-UI (chattsida):**
+
+Öppna valfri webbläsare på valfri enhet i nätverket:
+
+```
+https://<serverns-ip>:8443/
+```
+
+Där får du en färdig chattmiljö (mörkt tema, konversationsminne,
+hälsokoll) som pratar med modellen via samma krypterade API.
+
+**Skrivbordsikon:**
+
+På maskinen där snapet är installerat dyker **"VIBE Mistral AI"** upp i
+applikationsmenyn (GNOME/Ubuntu) med egen ikon. Klick öppnar web-UI:t i
+standardwebbläsaren via `vibe-mistral-ai.ui`.
+
 **Andra endpoints** (vidarebefordras till llama-server):
 
 | Endpoint              | Beskrivning                          |
@@ -94,3 +111,5 @@ sudo snap restart vibe-mistral-ai      # omstart
   om nätverket delas med andra.
 - Strömmande svar (SSE) buffras av gatewayen — svaret kommer komplett
   i ett stycke.
+- Web-UI:t serveras endast som statiska filer (`/`, `/index.html`,
+  `/icon.svg`); övriga GET-anrop proxas till modellservern.
