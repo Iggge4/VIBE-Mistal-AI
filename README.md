@@ -40,9 +40,18 @@ cd VIBE-Mistal-AI
 sudo ./install.sh
 ```
 
-`install.sh` gör allt: installerar snapd/snapcraft/lxd, bygger snap-paketet,
-installerar det lokalt (`--dangerous`, eftersom det inte är publicerat i
-Snap Store), laddar ner modellen och startar tjänsterna.
+`install.sh` gör allt: installerar snapd/snapcraft/lxd, bygger snap-paketet
+(`snapcraft pack`), installerar det lokalt (`--dangerous`, eftersom det inte
+är publicerat i Snap Store), laddar ner modellen och startar tjänsterna.
+
+**Uppdatera en befintlig installation:**
+
+```bash
+git pull
+sudo snapcraft pack --use-lxd
+sudo snap install --dangerous ./vibe-mistral-ai_*.snap
+sudo snap restart vibe-mistral-ai
+```
 
 ## Användning
 

@@ -23,8 +23,8 @@ snap install lxd || true
 lxd init --auto 2>/dev/null || true
 
 say "Bygger snap-paketet (kan ta lång tid första gången, llama.cpp kompileras)..."
-if ! snapcraft --use-lxd 2>/dev/null; then
-    snapcraft
+if ! snapcraft pack --use-lxd 2>/dev/null; then
+    snapcraft pack
 fi
 
 SNAP_FILE=$(ls -t "${SNAP_NAME}"_*.snap 2>/dev/null | head -n1)
