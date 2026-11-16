@@ -102,6 +102,40 @@ standardwebbläsaren via `vibe-mistral-ai.ui`.
 | `POST /v1/chat/completions` | Chat (OpenAI-format)           |
 | `POST /v1/completions`      | Textkomplettering              |
 
+## Godkännandeflöde (värddator styr, innehåll förblir privat)
+
+Varje POST-förfrågan (t.ex. ett chattmeddelande) måste **godkännas från
+värddatorn** innan den skickas vidare till modellen:
+
+1. Klienten skickar frågan → gatewayen parkerar den i en väntekö
+2. Värddatorns panel (`http://localhost:8444` på servermaskinen) visar:
+   **tid, käll-IP, endpoint, storlek i byte och ett fingerprint-hash**
+3. Värddatorn klickar **Godkänn** eller **Neka** — eller vägrar svara,
+   då nekas förfrågan automatiskt efter 120 s (HTTP 408)
+4. Godkänd → modellen svarar; nekad → klienten får HTTP 403
+
+Panelen visar även räknare: totalt, godkända, nekade, tidsutlöpta och
+antal per klient-IP. Räknarna sparas i
+`/var/snap/vibe-mistral-ai/common/usage.json`.
+
+**Integritetsgaranti:** panelen och loggarna visar *aldrig* textinnehåll —
+bara metadata. Hashen är enkelriktad (SHA-256, avkortad) och kan inte
+återskapas till text.
+
+> **Ärlig gräns:** modellen kör på värddatorn och behöver frågan i
+> klartext i RAM för att svara. Innehållet är alltså praktiskt taget
+> osynligt (ingen loggning, ingen visning, endast transientminne), men
+> en root-användare på maskinen kan tekniskt sett nå minnet. För
+> cryptografisk garanti krävs att modellen körs på annan hårdvara.
+
+**Stäng av/fler på godkännandet** (miljövariabler i `bin/start-gateway.sh`):
+
+| Variabel | Standard | Betydelse |
+|---|---|---|
+| `VIBE_REQUIRE_APPROVAL` | `1` | `0` = godkännande av |
+| `VIBE_APPROVAL_TIMEOUT` | `120` | sekunder tills auto-nek |
+| `VIBE_ADMIN_PORT` | `8444` | panelens port (endast localhost) |
+
 ## Tjänster
 
 ```bash

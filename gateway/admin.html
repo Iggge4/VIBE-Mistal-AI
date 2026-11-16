@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIBE Mistral AI — Godkännanden</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --accent: #ff7000;
+    --ok: #4ade80;
+    --bad: #f87171;
+    --text: #e8e8ee;
+    --muted: #8a8fa3;
+    --border: #2a2e3d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 24px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.3rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 24px; }
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    min-width: 130px;
+  }
+  .card .num { font-size: 1.9rem; font-weight: 700; }
+  .card .lbl { color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+  .card.ok .num { color: var(--ok); }
+  .card.bad .num { color: var(--bad); }
+  h2 { font-size: 1.05rem; margin-bottom: 12px; }
+  .req {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .req .meta { flex: 1; min-width: 220px; }
+  .req .meta .row { font-size: 0.9rem; }
+  .req .meta .row span { color: var(--muted); }
+  .req .meta .hash { font-family: monospace; font-size: 0.78rem; color: var(--muted); }
+  .btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #fff;
+  }
+  .btn.approve { background: #16a34a; }
+  .btn.deny { background: #dc2626; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .empty {
+    color: var(--muted);
+    background: var(--panel);
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+  }
+  .note {
+    margin-top: 28px;
+    padding: 14px 16px;
+    background: var(--panel);
+    border-radius: 12px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<h1>VIBE Mistral AI — värdpanel</h1>
+<div class="sub">Godkänn inkomna förfrågningar. Innehåll visas aldrig — endast metadata.</div>
+
+<div class="cards" id="cards"></div>
+
+<h2>Väntande förfrågningar</h2>
+<div id="pending"><div class="empty">Laddar…</div></div>
+
+<div class="note">
+  🔒 Integritet: varje rad visar endast tid, käll-IP, endpoint, storlek i byte
+  och ett enkelriktat hash-fingerprint. Textinnehållet skickas krypterat
+  direkt till modellen och visas eller loggas aldrig i denna panel.
+</div>
+
+<script>
+const cardsEl = document.getElementById("cards");
+const pendingEl = document.getElementById("pending");
+
+function renderCards(stats) {
+  const items = [
+    ["Totalt", stats.total, ""],
+    ["Godkända", stats.approved, "ok"],
+    ["Nekade", stats.denied, "bad"],
+    ["Tidsutlöpta", stats.timeout, ""],
+  ];
+  cardsEl.innerHTML = items.map(([lbl, num, cls]) =>
+    `<div class="card ${cls}"><div class="num">${num}</div><div class="lbl">${lbl}</div></div>`
+  ).join("");
+}
+
+function renderPending(list) {
+  if (!list.length) {
+    pendingEl.innerHTML = `<div class="empty">Inga väntande förfrågningar — allt är lugnt.</div>`;
+    return;
+  }
+  pendingEl.innerHTML = list.map(r => `
+    <div class="req" id="req-${r.id}">
+      <div class="meta">
+        <div class="row"><span>Tid:</span> ${r.time}</div>
+        <div class="row"><span>Från:</span> ${r.ip} <span>·</span> <span>Storlek:</span> ${r.size} B</div>
+        <div class="row"><span>Endpoint:</span> ${r.endpoint}</div>
+        <div class="hash">fingerprint: ${r.sha256}</div>
+      </div>
+      <button class="btn approve" onclick="decide('approve','${r.id}')">Godkänn</button>
+      <button class="btn deny" onclick="decide('deny','${r.id}')">Neka</button>
+    </div>
+  `).join("");
+}
+
+async function decide(action, id) {
+  await fetch(`/api/${action}/${id}`, { method: "POST" });
+  document.getElementById("req-" + id)?.remove();
+  refresh();
+}
+
+async function refresh() {
+  try {
+    const [p, s] = await Promise.all([
+      fetch("/api/pending").then(r => r.json()),
+      fetch("/api/stats").then(r => r.json()),
+    ]);
+    renderCards(s);
+    renderPending(p);
+  } catch {}
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

@@ -156,7 +156,7 @@ async function checkHealth() {
 
 async function ask(question) {
   history.push({ role: "user", content: question });
-  const bubble = addMsg("ai", "Tänker…", true);
+  const bubble = addMsg("ai", "Väntar på godkännande från värddatorn…", true);
   send.disabled = true;
   try {
     const r = await fetch("/v1/chat/completions", {
@@ -175,7 +175,14 @@ async function ask(question) {
     bubble.classList.remove("loading");
     history.push({ role: "assistant", content: answer });
   } catch (err) {
-    bubble.textContent = "Fel: " + err.message;
+    const msg = err.message || "";
+    if (msg.includes("denied")) {
+      bubble.textContent = "Nekad av värddatorn.";
+    } else if (msg.includes("no decision")) {
+      bubble.textContent = "Inget svar från värddatorn i tid — försök igen.";
+    } else {
+      bubble.textContent = "Fel: " + msg;
+    }
     bubble.classList.remove("loading");
   }
   send.disabled = false;
