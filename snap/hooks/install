@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+DATA_DIR="${SNAP_DATA:-/var/snap/vibe-mistral-ai/common}"
+CERT_DIR="$DATA_DIR/certs"
+
+mkdir -p "$CERT_DIR"
+
+if [ -f "$CERT_DIR/cert.pem" ] && [ -f "$CERT_DIR/key.pem" ]; then
+    echo "[install] TLS-certifikat finns redan, hoppar över generering."
+    exit 0
+fi
+
+openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+    -keyout "$CERT_DIR/key.pem" \
+    -out "$CERT_DIR/cert.pem" \
+    -subj "/CN=vibe-mistral-ai" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+chmod 600 "$CERT_DIR/key.pem"
+chmod 644 "$CERT_DIR/cert.pem"
+
+echo "[install] Självsignerat TLS-certifikat skapat i $CERT_DIR"

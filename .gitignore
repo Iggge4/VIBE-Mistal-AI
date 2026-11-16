@@ -1,0 +1,9 @@
+*.snap
+*.part
+parts/
+prime/
+stage/
+snap/.snapcraft/
+certs/
+__pycache__/
+*.pyc

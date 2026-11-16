@@ -1,0 +1,50 @@
+name: vibe-mistral-ai
+base: core22
+version: "0.1.0"
+summary: Lokal Mistral AI-server i snap med krypterat HTTPS-API
+description: |
+  Kör en lokal Mistral 7B Instruct-modell (GGUF via llama.cpp) i en
+  snap-miljö och exponerar ett krypterat HTTPS-API (OpenAI-kompatibelt
+  format) på port 8443 som andra enheter i nätverket kan anropa.
+
+  Kryptering sker med ett självsignerat TLS-certifikat som genereras
+  automatiskt vid installation av snap-paketet.
+confinement: classic
+grade: stable
+
+apps:
+  llamaserver:
+    command: bin/start-llama.sh
+    daemon: simple
+  gateway:
+    command: bin/start-gateway.sh
+    daemon: simple
+  setup-model:
+    command: bin/setup-model.sh
+  ask:
+    command: bin/mistral-ask.sh
+
+parts:
+  llama-cpp:
+    plugin: cmake
+    source: https://github.com/ggerganov/llama.cpp.git
+    source-tag: v1.0.0
+    cmake-parameters:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_NATIVE=OFF
+      - -DLLAMA_CURL=OFF
+      - -DLLAMA_BUILD_TESTS=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+    build-packages:
+      - build-essential
+      - cmake
+      - git
+  app-files:
+    plugin: dump
+    source: .
+    filesets:
+      app:
+        - bin/*
+        - gateway/*
+    stage:
+      - $app
