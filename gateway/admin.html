@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VIBE Mistral AI — Godkännanden</title>
+<title>VIBE Mistral AI — Värdpanel</title>
 <style>
   :root {
     --bg: #0f1117;
@@ -39,6 +39,7 @@
   .card.ok .num { color: var(--ok); }
   .card.bad .num { color: var(--bad); }
   h2 { font-size: 1.05rem; margin-bottom: 12px; }
+  h2.section { margin-top: 34px; }
   .req {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -82,6 +83,70 @@
     font-size: 0.82rem;
     line-height: 1.5;
   }
+  #dropzone {
+    background: var(--panel);
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 28px 16px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  #dropzone.drag {
+    border-color: var(--accent);
+    background: #221a12;
+    color: var(--text);
+  }
+  #dropzone .big { font-size: 1.6rem; }
+  #filepicker { display: none; }
+  .urlrow { display: flex; gap: 10px; margin: 14px 0 8px; }
+  .urlrow input {
+    flex: 1;
+    background: #14161f;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    padding: 11px 14px;
+    font-size: 0.95rem;
+  }
+  .urlrow input:focus { outline: none; border-color: var(--accent); }
+  .urlrow button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0 18px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .doc {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .doc .info { flex: 1; min-width: 200px; }
+  .doc .info .name { font-weight: 600; word-break: break-all; }
+  .doc .info .src { color: var(--muted); font-size: 0.78rem; word-break: break-all; }
+  .doc .info .src a { color: var(--muted); }
+  .doc .del {
+    background: transparent;
+    color: var(--bad);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .libmsg { font-size: 0.85rem; margin: 6px 0 14px; min-height: 1.2em; }
+  .libmsg.err { color: var(--bad); }
+  .libmsg.ok { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -92,6 +157,21 @@
 
 <h2>Väntande förfrågningar</h2>
 <div id="pending"><div class="empty">Laddar…</div></div>
+
+<h2 class="section">📚 Bibliotek</h2>
+<div class="sub">Bara du, på värddatorn, kan lägga in dokument här. Nätverksklienterna kan bara välja bland dem.</div>
+<div id="dropzone">
+  <div class="big">📄</div>
+  Dra och släpp textfiler här (txt, md, csv, html, json, kod …)<br>
+  eller klicka för att välja filer
+</div>
+<input type="file" id="filepicker" multiple>
+<div class="urlrow">
+  <input type="url" id="urlinput" placeholder="https://exempel.se/sida — texten kopieras, inget laddas ned">
+  <button id="urlbtn">Lägg till</button>
+</div>
+<div class="libmsg" id="libmsg"></div>
+<div id="doclist"><div class="empty">Inga dokument ännu.</div></div>
 
 <div class="note">
   🔒 Integritet: varje rad visar endast tid, käll-IP, endpoint, storlek i byte
@@ -153,6 +233,103 @@ async function refresh() {
 
 refresh();
 setInterval(refresh, 2000);
+
+const dropzone = document.getElementById("dropzone");
+const filepicker = document.getElementById("filepicker");
+const urlinput = document.getElementById("urlinput");
+const urlbtn = document.getElementById("urlbtn");
+const libmsg = document.getElementById("libmsg");
+const doclist = document.getElementById("doclist");
+
+function libNote(text, isErr) {
+  libmsg.textContent = text;
+  libmsg.className = "libmsg " + (isErr ? "err" : "ok");
+}
+
+function fmtChars(n) {
+  return n >= 1000 ? (n / 1000).toFixed(1) + "k tecken" : n + " tecken";
+}
+
+async function refreshLibrary() {
+  try {
+    const docs = await fetch("/api/library").then(r => r.json());
+    if (!docs.length) {
+      doclist.innerHTML = `<div class="empty">Inga dokument ännu.</div>`;
+      return;
+    }
+    doclist.innerHTML = docs.map(d => `
+      <div class="doc">
+        <div class="info">
+          <div class="name">📄 ${d.name}</div>
+          <div class="src">${d.source === "fil" ? "Lokal fil" : `<a href="${d.source}" target="_blank" rel="noopener">${d.source}</a>`} · ${fmtChars(d.chars)} · ${d.date}</div>
+        </div>
+        <button class="del" onclick="delDoc('${d.id}')">Ta bort</button>
+      </div>
+    `).join("");
+  } catch {}
+}
+
+async function addFiles(files) {
+  for (const f of files) {
+    try {
+      const content = await f.text();
+      const r = await fetch("/api/library/file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: f.name, content }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+      libNote(`La till ”${f.name}” (${fmtChars(data.doc.chars)}).`, false);
+    } catch (err) {
+      libNote(`Fel för ${f.name}: ${err.message}`, true);
+    }
+  }
+  refreshLibrary();
+}
+
+dropzone.addEventListener("click", () => filepicker.click());
+filepicker.addEventListener("change", () => {
+  addFiles([...filepicker.files]);
+  filepicker.value = "";
+});
+
+dropzone.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  dropzone.classList.add("drag");
+});
+dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag"));
+dropzone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dropzone.classList.remove("drag");
+  addFiles([...e.dataTransfer.files]);
+});
+
+urlbtn.addEventListener("click", async () => {
+  const url = urlinput.value.trim();
+  if (!url) return;
+  libNote("Hämtar sidan …", false);
+  try {
+    const r = await fetch("/api/library/url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "HTTP " + r.status);
+    libNote(`Kopierade texten från ${url} (${fmtChars(data.doc.chars)}).`, false);
+    urlinput.value = "";
+  } catch (err) {
+    libNote("Fel: " + err.message, true);
+  }
+  refreshLibrary();
+});
+urlinput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") urlbtn.click();
+});
+
+refreshLibrary();
+setInterval(refreshLibrary, 5000);
 </script>
 </body>
 </html>

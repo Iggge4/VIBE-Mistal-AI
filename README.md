@@ -136,6 +136,32 @@ bara metadata. Hashen är enkelriktad (SHA-256, avkortad) och kan inte
 | `VIBE_APPROVAL_TIMEOUT` | `120` | sekunder tills auto-nek |
 | `VIBE_ADMIN_PORT` | `8444` | panelens port (endast localhost) |
 
+## Bibliotek (drag & drop — bara värddatorn kan lägga in)
+
+Värdpanelen (`http://localhost:8444`) har en bibliotekssektion där du
+på värddatorn lägger in kunskapsdokument som AI:n kan använda:
+
+- **Drag & drop:** dra textfiler (txt, md, csv, html, json, kod …)
+  till rutan, eller klicka för att välja filer.
+- **Internetadresser:** klistra in en URL och klicka **Lägg till**.
+  Sidans *text* kopieras ut (HTML-taggar, script och stilar tas bort) —
+  inget laddas ned och sidan läses bara en gång.
+- **Tydlig översikt:** varje dokument visas med namn, källa, storlek
+  (antal tecken) och datum, med en **Ta bort**-knapp.
+
+Allt hanteras **endast via värddatorn** — panelen lyssnar bara på
+`127.0.0.1`, så nätverksklienter kan inte lägga till eller ta bort
+någonting. Dokumenten sparas i `/var/snap/vibe-mistral-ai/common/library/`
+med en `library.json`-lista.
+
+**Så här använder klienten biblioteket:** i chatt-UI:t finns knappen
+📚 **Bibliotek**. Klicka, bocka för de dokument som ska användas och
+ställ din fråga. Klienten ser bara namn och storlek — aldrig innehållet.
+Vid godkänd förfrågan stoppar gatewayen in dokumenttexten som
+systemkontext (max ~12 000 tecken totalt, långt material kortas av)
+innan den skickas vidare till modellen. Även biblioteksförfrågningar
+passerar godkännandeflödet som vanligt.
+
 ## Tjänster
 
 ```bash

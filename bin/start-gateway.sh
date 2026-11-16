@@ -10,5 +10,6 @@ export VIBE_ADMIN_PORT="${VIBE_ADMIN_PORT:-8444}"
 export VIBE_APPROVAL_TIMEOUT="${VIBE_APPROVAL_TIMEOUT:-120}"
 export VIBE_REQUIRE_APPROVAL="${VIBE_REQUIRE_APPROVAL:-1}"
 export VIBE_STATE_FILE="$DATA_DIR/usage.json"
+export VIBE_LIB_DIR="$DATA_DIR/library"
 
 exec python3 "$(dirname "$(readlink -f "$0")")/../gateway/gateway.py"

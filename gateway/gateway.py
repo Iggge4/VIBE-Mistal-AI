@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BACKEND = os.environ.get("VIBE_BACKEND", "http://127.0.0.1:8080")
@@ -24,6 +25,11 @@ ADMIN_DIR = os.path.dirname(os.path.abspath(__file__))
 APPROVAL_TIMEOUT = int(os.environ.get("VIBE_APPROVAL_TIMEOUT", "120"))
 REQUIRE_APPROVAL = os.environ.get("VIBE_REQUIRE_APPROVAL", "1") == "1"
 STATE_FILE = os.environ.get("VIBE_STATE_FILE", "usage.json")
+LIB_DIR = os.environ.get(
+    "VIBE_LIB_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(WEB_DIR)), "data", "library"),
+)
+MAX_CONTEXT_CHARS = int(os.environ.get("VIBE_MAX_CONTEXT_CHARS", "12000"))
 
 HOP_HEADERS = {
     "connection",
@@ -126,6 +132,137 @@ class State:
 STATE = State()
 
 
+class _TextExtractor(HTMLParser):
+    SKIP = {"script", "style", "noscript", "head", "template"}
+    BREAK = {"p", "br", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._skip = 0
+        self._chunks = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+        elif tag in self.BREAK:
+            self._chunks.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if not self._skip and data.strip():
+            self._chunks.append(data.strip() + " ")
+
+    def text(self):
+        lines = (ln.strip() for ln in "".join(self._chunks).splitlines())
+        return "\n".join(ln for ln in lines if ln)
+
+
+def extract_html_text(data):
+    parser = _TextExtractor()
+    try:
+        parser.feed(data.decode("utf-8", errors="replace"))
+    except Exception:
+        return ""
+    return parser.text()
+
+
+def _lib_meta_path():
+    return os.path.join(LIB_DIR, "library.json")
+
+
+def _load_lib_meta():
+    try:
+        with open(_lib_meta_path()) as fh:
+            return json.load(fh)
+    except Exception:
+        return []
+
+
+def _save_lib_meta(docs):
+    os.makedirs(LIB_DIR, exist_ok=True)
+    tmp = _lib_meta_path() + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(docs, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, _lib_meta_path())
+
+
+def library_add(name, source, text):
+    doc_id = hashlib.sha256(
+        ("%f|%s|%s" % (time.time(), name, source)).encode()
+    ).hexdigest()[:12]
+    os.makedirs(LIB_DIR, exist_ok=True)
+    with open(os.path.join(LIB_DIR, doc_id + ".txt"), "w") as fh:
+        fh.write(text)
+    entry = {
+        "id": doc_id,
+        "name": name,
+        "source": source,
+        "chars": len(text),
+        "date": time.strftime("%Y-%m-%d %H:%M"),
+    }
+    with _lib_lock:
+        docs = _load_lib_meta()
+        docs.append(entry)
+        _save_lib_meta(docs)
+    return entry
+
+
+def library_list():
+    with _lib_lock:
+        return _load_lib_meta()
+
+
+def library_delete(doc_id):
+    with _lib_lock:
+        docs = _load_lib_meta()
+        remaining = [d for d in docs if d["id"] != doc_id]
+        if len(remaining) == len(docs):
+            return False
+        _save_lib_meta(remaining)
+    try:
+        os.remove(os.path.join(LIB_DIR, doc_id + ".txt"))
+    except OSError:
+        pass
+    return True
+
+
+def library_get(doc_ids):
+    metas = {d["id"]: d for d in library_list()}
+    out = []
+    for doc_id in doc_ids:
+        meta = metas.get(doc_id)
+        if not meta:
+            continue
+        try:
+            with open(os.path.join(LIB_DIR, doc_id + ".txt")) as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        out.append((meta, text))
+    return out
+
+
+def fetch_url_text(url):
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("ogiltig URL (måste börja med http:// eller https://)")
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0 (compatible; VIBE-Mistral-Ai)"}
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        ctype = resp.headers.get("Content-Type", "")
+        data = resp.read(2 * 1024 * 1024)
+    head = data[:512].lower()
+    if "html" in ctype or b"<html" in head or b"<!doctype" in head:
+        return extract_html_text(data)
+    return data.decode("utf-8", errors="replace")
+
+
+_lib_lock = threading.Lock()
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -173,15 +310,70 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _apply_library(self, body):
+        try:
+            data = json.loads(body)
+        except Exception:
+            return body
+        if "library" not in data:
+            return body
+        ids = data.pop("library")
+        docs = library_get(ids) if isinstance(ids, list) else []
+        payload = json.dumps(data).encode("utf-8")
+        if not docs:
+            return payload
+        parts = []
+        used = 0
+        truncated = False
+        for meta, text in docs:
+            if used >= MAX_CONTEXT_CHARS:
+                truncated = True
+                break
+            chunk = text[: MAX_CONTEXT_CHARS - used]
+            if len(chunk) < len(text):
+                truncated = True
+            parts.append(
+                "Dokument: %s (källa: %s)\n%s" % (meta["name"], meta["source"], chunk)
+            )
+            used += len(chunk)
+        context = "\n\n".join(parts)
+        if truncated:
+            context += "\n\n[Vissa dokument var för stora och har kortats av.]"
+        missing = len(ids) - len(docs)
+        note = " (%d valda dokument hittades inte)" % missing if missing > 0 else ""
+        names = ", ".join(m["name"] for m, _ in docs)
+        system_msg = {
+            "role": "system",
+            "content": (
+                "Använd följande dokument från användarens bibliotek (%s)%s som "
+                "kunskapskälla när du svarar. Svara på användarens språk.\n\n%s"
+                % (names, note, context)
+            ),
+        }
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            data["messages"] = [system_msg] + messages
+        return json.dumps(data).encode("utf-8")
+
     def _proxy(self):
         if self.command == "GET":
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html", "/icon.svg"):
                 self._serve_static(WEB_DIR)
                 return
+            if path == "/v1/library":
+                self._send_bytes(
+                    200,
+                    json.dumps(library_list(), ensure_ascii=False).encode("utf-8"),
+                    "application/json",
+                )
+                return
 
         length = int(self.headers.get("Content-Length", 0) or 0)
         body = self.rfile.read(length) if length else None
+
+        if self.command == "POST" and body:
+            body = self._apply_library(body)
 
         if self.command == "POST" and REQUIRE_APPROVAL:
             client_ip = self.client_address[0]
@@ -243,14 +435,62 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._send_json(STATE.pending_list())
         elif path == "/api/stats":
             self._send_json(STATE.stats_view())
+        elif path == "/api/library":
+            self._send_json(library_list())
         else:
             self._send_json({"error": "not found"}, 404)
 
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+
+    def _lib_add_file(self):
+        data = self._read_json_body()
+        if not data or not data.get("name") or not data.get("content"):
+            self._send_json({"error": "namn och innehåll krävs"}, 400)
+            return
+        entry = library_add(str(data["name"]), "fil", str(data["content"]))
+        self._send_json({"ok": True, "doc": entry})
+
+    def _lib_add_url(self):
+        data = self._read_json_body()
+        url = (data or {}).get("url", "").strip() if data else ""
+        if not url:
+            self._send_json({"error": "url krävs"}, 400)
+            return
+        try:
+            text = fetch_url_text(url)
+        except Exception as exc:
+            self._send_json({"error": "kunde inte hämta sidan: %s" % exc}, 502)
+            return
+        if not text.strip():
+            self._send_json({"error": "ingen text kunde extraheras från sidan"}, 400)
+            return
+        entry = library_add(url, url, text)
+        self._send_json({"ok": True, "doc": entry})
+
     def do_POST(self):
-        parts = self.path.strip("/").split("/")
+        path = self.path.split("?", 1)[0].strip("/")
+        parts = path.split("/")
         if len(parts) == 3 and parts[0] == "api" and parts[1] in ("approve", "deny"):
             decision = "approved" if parts[1] == "approve" else "denied"
             ok = STATE.decide(parts[2], decision)
+            self._send_json({"ok": ok})
+        elif path == "api/library/file":
+            self._lib_add_file()
+        elif path == "api/library/url":
+            self._lib_add_url()
+        else:
+            self._send_json({"error": "not found"}, 404)
+
+    def do_DELETE(self):
+        parts = self.path.split("?", 1)[0].strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "library":
+            ok = library_delete(parts[2])
             self._send_json({"ok": ok})
         else:
             self._send_json({"error": "not found"}, 404)

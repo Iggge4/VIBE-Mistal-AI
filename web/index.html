@@ -107,6 +107,26 @@
     font-size: 0.85rem;
   }
   #clear:hover { color: var(--text); }
+  #libpanel {
+    display: none;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-top: 1px solid #2a2e3d;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  #libpanel.open { display: block; }
+  #libpanel .libtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 8px; }
+  #libpanel label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  #libpanel label .c { color: var(--muted); font-size: 0.75rem; }
+  #libpanel .none { color: var(--muted); font-size: 0.85rem; font-style: italic; }
 </style>
 </head>
 <body>
@@ -118,7 +138,12 @@
 <div id="chat">
   <div class="msg ai">Hej! Jag är din lokala Mistral AI. Ställ en fråga för att börja.</div>
 </div>
+<div id="libpanel">
+  <div class="libtitle">Välj dokument som AI:n ska använda som kunskapskälla:</div>
+  <div id="liblist"><span class="none">Laddar bibliotek…</span></div>
+</div>
 <form id="form">
+  <button type="button" id="libtoggle" title="Välj biblioteksdokument">📚 Bibliotek</button>
   <button type="button" id="clear" title="Rensa konversationen">Rensa</button>
   <textarea id="input" rows="1" placeholder="Skriv ett meddelande&hellip;" autofocus></textarea>
   <button type="submit" id="send">Skicka</button>
@@ -130,6 +155,40 @@ const input = document.getElementById("input");
 const send = document.getElementById("send");
 const clearBtn = document.getElementById("clear");
 const statusEl = document.getElementById("status");
+const libpanel = document.getElementById("libpanel");
+const libtoggle = document.getElementById("libtoggle");
+const liblist = document.getElementById("liblist");
+
+function selectedLibIds() {
+  return [...liblist.querySelectorAll("input:checked")].map(cb => cb.value);
+}
+
+function updateLibLabel() {
+  const n = selectedLibIds().length;
+  libtoggle.textContent = n ? `📚 Bibliotek (${n} valda)` : "📚 Bibliotek";
+}
+
+async function refreshLibrary() {
+  try {
+    const docs = await fetch("/v1/library").then(r => r.json());
+    if (!docs.length) {
+      liblist.innerHTML = '<span class="none">Biblioteket är tomt — värddatorn kan lägga in dokument via sin panel.</span>';
+      return;
+    }
+    liblist.innerHTML = docs.map(d =>
+      `<label><input type="checkbox" value="${d.id}"> ${d.name} <span class="c">(${d.chars} tecken)</span></label>`
+    ).join("");
+  } catch {
+    liblist.innerHTML = '<span class="none">Kunde inte läsa biblioteket.</span>';
+  }
+  updateLibLabel();
+}
+
+libtoggle.addEventListener("click", () => {
+  libpanel.classList.toggle("open");
+  if (libpanel.classList.contains("open")) refreshLibrary();
+});
+liblist.addEventListener("change", updateLibLabel);
 
 const history = [];
 const SYSTEM_PROMPT = "Du är en hjälpsam AI-assistent. Svara på samma språk som användaren skriver.";
@@ -166,6 +225,7 @@ async function ask(question) {
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...history],
         max_tokens: 1024,
         stream: false,
+        library: selectedLibIds(),
       }),
     });
     const data = await r.json();
