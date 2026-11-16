@@ -21,5 +21,5 @@ exec "$SERVER" \
     -m "$MODEL" \
     --host 127.0.0.1 \
     --port 8080 \
-    -c 4096 \
+    -c "${VIBE_CTX:-8192}" \
     -t "$(nproc)"

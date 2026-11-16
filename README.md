@@ -142,6 +142,7 @@ bara metadata. Hashen är enkelriktad (SHA-256, avkortad) och kan inte
 | `VIBE_REQUIRE_APPROVAL` | `1` | `0` = godkännande av |
 | `VIBE_APPROVAL_TIMEOUT` | `120` | sekunder tills auto-nek |
 | `VIBE_ADMIN_PORT` | `8444` | panelens port (endast localhost) |
+| `VIBE_CTX` | `8192` | modellens context-f\u00f6nster i tokens (i `bin/start-llama.sh`) |
 
 ## Bibliotek (drag & drop — bara värddatorn kan lägga in)
 
