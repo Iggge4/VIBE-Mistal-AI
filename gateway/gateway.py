@@ -502,7 +502,32 @@ class ProxyHandler(BaseHTTPRequestHandler):
             ),
         }
         if isinstance(messages, list):
-            data["messages"] = [system_msg] + messages
+            merged = []
+            for msg in messages:
+                if (
+                    merged
+                    and isinstance(msg, dict)
+                    and msg.get("role") == "system"
+                    and merged[-1].get("role") == "system"
+                ):
+                    merged[-1] = dict(merged[-1])
+                    merged[-1]["content"] = (
+                        str(merged[-1].get("content", ""))
+                        + "\n\n"
+                        + str(msg.get("content", ""))
+                    )
+                else:
+                    merged.append(msg)
+            if merged and isinstance(merged[0], dict) and merged[0].get("role") == "system":
+                merged[0] = dict(merged[0])
+                merged[0]["content"] = (
+                    str(merged[0].get("content", ""))
+                    + "\n\n"
+                    + system_msg["content"]
+                )
+            else:
+                merged.insert(0, system_msg)
+            data["messages"] = merged
         return json.dumps(data).encode("utf-8")
 
     def _proxy(self):
