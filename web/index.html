@@ -127,6 +127,51 @@
   }
   #libpanel label .c { color: var(--muted); font-size: 0.75rem; }
   #libpanel .none { color: var(--muted); font-size: 0.85rem; font-style: italic; }
+  #namegate {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 11, 16, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  #namegate.hidden { display: none; }
+  .gatebox {
+    background: var(--panel);
+    border: 1px solid #2a2e3d;
+    border-radius: 16px;
+    padding: 32px;
+    width: min(90vw, 380px);
+    text-align: center;
+  }
+  .gatebox h2 { font-size: 1.15rem; margin-bottom: 6px; }
+  .gatebox p { color: var(--muted); font-size: 0.85rem; margin-bottom: 18px; }
+  .gatebox input {
+    width: 100%;
+    background: #14161f;
+    border: 1px solid #2a2e3d;
+    border-radius: 10px;
+    color: var(--text);
+    padding: 12px 14px;
+    font-size: 1rem;
+    text-align: center;
+  }
+  .gatebox input:focus { outline: none; border-color: var(--accent); }
+  .gatebox button {
+    margin-top: 14px;
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .gateerr { color: #f87171; font-size: 0.8rem; margin-top: 10px; min-height: 1em; }
+  header .who { font-size: 0.8rem; color: var(--text); }
   .note-msg {
     align-self: center;
     color: var(--muted);
@@ -143,8 +188,18 @@
 <header>
   <img src="/icon.svg" alt="VIBE Mistral AI">
   <h1>VIBE Mistral AI</h1>
+  <span class="who" id="who"></span>
   <span class="status" id="status">Kontrollerar anslutning&hellip;</span>
 </header>
+<div id="namegate">
+  <div class="gatebox">
+    <h2>Vad heter du?</h2>
+    <p>Namnet syns för värddatorn vid varje förfrågan — aldrig innehållet i dina meddelanden.</p>
+    <input type="text" id="nameinput" maxlength="60" placeholder="Ditt namn" autofocus>
+    <button id="namebtn">Börja chatta</button>
+    <div class="gateerr" id="gateerr"></div>
+  </div>
+</div>
 <div id="chat">
   <div class="msg ai">Hej! Jag är din lokala Mistral AI. Ställ en fråga för att börja.</div>
 </div>
@@ -159,6 +214,35 @@
   <button type="submit" id="send">Skicka</button>
 </form>
 <script>
+const namegate = document.getElementById("namegate");
+const nameinput = document.getElementById("nameinput");
+const namebtn = document.getElementById("namebtn");
+const gateerr = document.getElementById("gateerr");
+const whoEl = document.getElementById("who");
+
+let userName = "";
+try { userName = localStorage.getItem("vibe_name") || ""; } catch {}
+
+function applyName() {
+  whoEl.textContent = userName ? "Användare: " + userName : "";
+  namegate.classList.toggle("hidden", !!userName);
+}
+applyName();
+
+namebtn.addEventListener("click", () => {
+  const name = nameinput.value.trim();
+  if (!name) {
+    gateerr.textContent = "Du måste skriva ett namn för att chatta.";
+    return;
+  }
+  userName = name;
+  try { localStorage.setItem("vibe_name", name); } catch {}
+  applyName();
+});
+nameinput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") namebtn.click();
+});
+
 const chat = document.getElementById("chat");
 const form = document.getElementById("form");
 const input = document.getElementById("input");
@@ -258,6 +342,7 @@ async function ask(question) {
         max_tokens: 1024,
         stream: false,
         library: sel,
+        client_name: userName,
       }),
     });
     const data = await r.json();
@@ -285,6 +370,11 @@ form.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = input.value.trim();
   if (!text || send.disabled) return;
+  if (!userName) {
+    namegate.classList.remove("hidden");
+    nameinput.focus();
+    return;
+  }
   input.value = "";
   addMsg("user", text);
   ask(text);

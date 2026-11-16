@@ -114,6 +114,13 @@ värddatorn** innan den skickas vidare till modellen:
    då nekas förfrågan automatiskt efter 120 s (HTTP 408)
 4. Godkänd → modellen svarar; nekad → klienten får HTTP 403
 
+Klienten måste ange ett **namn** innan chatten kan användas; namnet syns
+i värdpanelen vid varje förfrågan (innehållet syns fortfarande aldrig).
+I panelens sektion **⭐ Automatiskt godkännande** kan du lägga till namn
+som slås igenom utan klick — de räknas fortfarande i statistiken
+(kolumnen "Automatiska"). Obs: namnet självdeklareras av klienten,
+använd auto-godkännande som bekvämlighet, inte säkerhetsgräns.
+
 Panelen visar även räknare: totalt, godkända, nekade, tidsutlöpta och
 antal per klient-IP. Räknarna sparas i
 `/var/snap/vibe-mistral-ai/common/usage.json`.

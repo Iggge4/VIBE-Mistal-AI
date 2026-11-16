@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +30,10 @@ ADMIN_DIR = os.path.dirname(os.path.abspath(__file__))
 APPROVAL_TIMEOUT = int(os.environ.get("VIBE_APPROVAL_TIMEOUT", "120"))
 REQUIRE_APPROVAL = os.environ.get("VIBE_REQUIRE_APPROVAL", "1") == "1"
 STATE_FILE = os.environ.get("VIBE_STATE_FILE", "usage.json")
+AUTO_FILE = os.environ.get(
+    "VIBE_AUTO_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(STATE_FILE)), "autoapprove.json"),
+)
 LIB_DIR = os.environ.get(
     "VIBE_LIB_DIR",
     os.path.join(os.path.dirname(os.path.abspath(WEB_DIR)), "data", "library"),
@@ -58,7 +63,7 @@ class State:
     def __init__(self):
         self.lock = threading.Lock()
         self.pending = {}
-        self.stats = {"total": 0, "approved": 0, "denied": 0, "timeout": 0, "by_ip": {}}
+        self.stats = {"total": 0, "approved": 0, "denied": 0, "timeout": 0, "auto": 0, "by_ip": {}}
         self._load()
 
     def _load(self):
@@ -77,7 +82,7 @@ class State:
         except Exception:
             pass
 
-    def register(self, ip, endpoint, size, body_sha):
+    def register(self, ip, endpoint, size, body_sha, name=""):
         rid = hashlib.sha256(
             ("%f|%s|%s" % (time.time(), ip, endpoint)).encode()
         ).hexdigest()[:12]
@@ -85,6 +90,7 @@ class State:
             "id": rid,
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "ip": ip,
+            "name": name,
             "endpoint": endpoint,
             "size": size,
             "sha256": body_sha,
@@ -125,6 +131,7 @@ class State:
                     "id": e["id"],
                     "time": e["time"],
                     "ip": e["ip"],
+                    "name": e["name"],
                     "endpoint": e["endpoint"],
                     "size": e["size"],
                     "sha256": e["sha256"],
@@ -345,6 +352,51 @@ def _select_chunks(docs, terms):
 _lib_lock = threading.Lock()
 
 
+def auto_list():
+    try:
+        with open(AUTO_FILE) as fh:
+            return json.load(fh)
+    except Exception:
+        return []
+
+
+def _save_auto(names):
+    os.makedirs(os.path.dirname(_auto_path()) or ".", exist_ok=True)
+    tmp = _auto_path() + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(names, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, _auto_path())
+
+
+def _auto_path():
+    return AUTO_FILE
+
+
+def auto_add(name):
+    with _lib_lock:
+        names = auto_list()
+        if name not in names:
+            names.append(name)
+            _save_auto(names)
+        return names
+
+
+def auto_remove(name):
+    with _lib_lock:
+        names = auto_list()
+        if name in names:
+            names.remove(name)
+            _save_auto(names)
+            return True
+        return False
+
+
+def auto_check(name):
+    if not name:
+        return False
+    return name.strip().lower() in (n.strip().lower() for n in auto_list())
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -376,8 +428,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             payload = fh.read()
         self._send_bytes(200, payload, ctype)
 
-    def _await_approval(self, ip, endpoint, size, body_sha):
-        rid = STATE.register(ip, endpoint, size, body_sha)
+    def _await_approval(self, ip, endpoint, size, body_sha, name=""):
+        rid = STATE.register(ip, endpoint, size, body_sha, name)
         entry = STATE.pending.get(rid)
         granted = entry["event"].wait(timeout=APPROVAL_TIMEOUT)
         decision = entry["decision"]
@@ -470,14 +522,33 @@ class ProxyHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0) or 0)
         body = self.rfile.read(length) if length else None
 
+        client_name = ""
         if self.command == "POST" and body:
+            try:
+                data = json.loads(body)
+                if isinstance(data, dict):
+                    client_name = str(data.pop("client_name", "") or "")[:60]
+                    body = json.dumps(data).encode("utf-8")
+            except Exception:
+                pass
             body = self._apply_library(body)
 
         if self.command == "POST" and REQUIRE_APPROVAL:
             client_ip = self.client_address[0]
-            body_sha = hashlib.sha256(body).hexdigest()[:16] if body else "-"
-            if not self._await_approval(client_ip, self.path, length, body_sha):
-                return
+            if auto_check(client_name):
+                with STATE.lock:
+                    STATE.stats["approved"] += 1
+                    STATE.stats["auto"] += 1
+                    STATE.save()
+                sys.stderr.write(
+                    "[gateway] auto-godk\u00e4nd: %s %s\n" % (client_name, self.path)
+                )
+            else:
+                body_sha = hashlib.sha256(body).hexdigest()[:16] if body else "-"
+                if not self._await_approval(
+                    client_ip, self.path, len(body), body_sha, client_name
+                ):
+                    return
 
         url = BACKEND + self.path
         req = urllib.request.Request(url, data=body, method=self.command)
@@ -535,6 +606,8 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._send_json(STATE.stats_view())
         elif path == "/api/library":
             self._send_json(library_list())
+        elif path == "/api/autoapprove":
+            self._send_json(auto_list())
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -624,6 +697,14 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._lib_add_pdf()
         elif path == "api/library/url":
             self._lib_add_url()
+        elif path == "api/autoapprove":
+            data = self._read_json_body()
+            name = (data or {}).get("name", "").strip() if data else ""
+            if not name:
+                self._send_json({"error": "namn kr\u00e4vs"}, 400)
+                return
+            names = auto_add(name)
+            self._send_json({"ok": True, "users": names})
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -631,6 +712,9 @@ class AdminHandler(BaseHTTPRequestHandler):
         parts = self.path.split("?", 1)[0].strip("/").split("/")
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "library":
             ok = library_delete(parts[2])
+            self._send_json({"ok": ok})
+        elif len(parts) == 3 and parts[0] == "api" and parts[1] == "autoapprove":
+            ok = auto_remove(urllib.parse.unquote(parts[2]))
             self._send_json({"ok": ok})
         else:
             self._send_json({"error": "not found"}, 404)

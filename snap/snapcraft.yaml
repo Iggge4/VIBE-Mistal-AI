@@ -1,6 +1,6 @@
 name: vibe-mistral-ai
 base: core22
-version: "0.2.3"
+version: "0.3.0"
 summary: Lokal Mistral AI-server i snap med krypterat HTTPS-API
 description: |
   Kör en lokal Mistral 7B Instruct-modell (GGUF via llama.cpp) i en

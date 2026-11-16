@@ -173,6 +173,14 @@
 <div class="libmsg" id="libmsg"></div>
 <div id="doclist"><div class="empty">Inga dokument ännu.</div></div>
 
+<h2 class="section">⭐ Automatiskt godkännande</h2>
+<div class="sub">Frågor från dessa användarnamn godkänns automatiskt (räknas i panelen men kräver inget klick). Obs: namnet självdeklareras av klienten — använd det som bekvämlighet, inte säkerhetsgräns.</div>
+<div class="urlrow">
+  <input type="text" id="autoinput" placeholder="Namn, t.ex. Jonas">
+  <button id="autobtn">Lägg till</button>
+</div>
+<div id="autolist"><div class="empty">Inga automatiskt godkända användare.</div></div>
+
 <div class="note">
   🔒 Integritet: varje rad visar endast tid, käll-IP, endpoint, storlek i byte
   och ett enkelriktat hash-fingerprint. Textinnehållet skickas krypterat
@@ -189,6 +197,7 @@ function renderCards(stats) {
     ["Godkända", stats.approved, "ok"],
     ["Nekade", stats.denied, "bad"],
     ["Tidsutlöpta", stats.timeout, ""],
+    ["Automatiska", stats.auto || 0, "ok"],
   ];
   cardsEl.innerHTML = items.map(([lbl, num, cls]) =>
     `<div class="card ${cls}"><div class="num">${num}</div><div class="lbl">${lbl}</div></div>`
@@ -204,7 +213,7 @@ function renderPending(list) {
     <div class="req" id="req-${r.id}">
       <div class="meta">
         <div class="row"><span>Tid:</span> ${r.time}</div>
-        <div class="row"><span>Från:</span> ${r.ip} <span>·</span> <span>Storlek:</span> ${r.size} B</div>
+        <div class="row"><span>Från:</span> ${r.ip} <span>·</span> <span>Namn:</span> <b>${r.name || "okänd"}</b> <span>·</span> <span>Storlek:</span> ${r.size} B</div>
         <div class="row"><span>Endpoint:</span> ${r.endpoint}</div>
         <div class="hash">fingerprint: ${r.sha256}</div>
       </div>
@@ -248,6 +257,11 @@ function libNote(text, isErr) {
 
 function fmtChars(n) {
   return n >= 1000 ? (n / 1000).toFixed(1) + "k tecken" : n + " tecken";
+}
+
+async function delDoc(id) {
+  await fetch("/api/library/" + id, { method: "DELETE" });
+  refreshLibrary();
 }
 
 async function refreshLibrary() {
@@ -351,6 +365,49 @@ urlinput.addEventListener("keydown", (e) => {
 
 refreshLibrary();
 setInterval(refreshLibrary, 5000);
+
+const autoinput = document.getElementById("autoinput");
+const autobtn = document.getElementById("autobtn");
+const autolist = document.getElementById("autolist");
+
+async function refreshAuto() {
+  try {
+    const users = await fetch("/api/autoapprove").then(r => r.json());
+    if (!users.length) {
+      autolist.innerHTML = `<div class="empty">Inga automatiskt godkända användare.</div>`;
+      return;
+    }
+    autolist.innerHTML = users.map(n => `
+      <div class="doc">
+        <div class="info"><div class="name">⭐ ${n}</div></div>
+        <button class="del" onclick="delAuto('${n}')">Ta bort</button>
+      </div>
+    `).join("");
+  } catch {}
+}
+
+autobtn.addEventListener("click", async () => {
+  const name = autoinput.value.trim();
+  if (!name) return;
+  const r = await fetch("/api/autoapprove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (r.ok) autoinput.value = "";
+  refreshAuto();
+});
+autoinput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") autobtn.click();
+});
+
+async function delAuto(name) {
+  await fetch("/api/autoapprove/" + encodeURIComponent(name), { method: "DELETE" });
+  refreshAuto();
+}
+
+refreshAuto();
+setInterval(refreshAuto, 5000);
 </script>
 </body>
 </html>
