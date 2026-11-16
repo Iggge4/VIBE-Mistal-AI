@@ -146,6 +146,10 @@ på värddatorn lägger in kunskapsdokument som AI:n kan använda:
 - **Internetadresser:** klistra in en URL och klicka **Lägg till**.
   Sidans *text* kopieras ut (HTML-taggar, script och stilar tas bort) —
   inget laddas ned och sidan läses bara en gång.
+- **PDF stöds inte ännu** — spara som .txt eller kopiera in texten.
+- **Sök i hela dokumentet:** även långa dokument (t.ex. hela SoldF)
+  fungerar. Gatewayen delar upp dokumentet i stycken och skickar
+  automatiskt de utdrag som bäst matchar frågan — inte bara början.
 - **Tydlig översikt:** varje dokument visas med namn, källa, storlek
   (antal tecken) och datum, med en **Ta bort**-knapp.
 
@@ -158,7 +162,7 @@ med en `library.json`-lista.
 📚 **Bibliotek**. Klicka, bocka för de dokument som ska användas och
 ställ din fråga. Klienten ser bara namn och storlek — aldrig innehållet.
 Vid godkänd förfrågan stoppar gatewayen in dokumenttexten som
-systemkontext (max ~12 000 tecken totalt, långt material kortas av)
+systemkontext (de mest relevanta utdragen, max ~12 000 tecken totalt)
 innan den skickas vidare till modellen. Även biblioteksförfrågningar
 passerar godkännandeflödet som vanligt.
 

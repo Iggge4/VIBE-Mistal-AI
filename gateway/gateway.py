@@ -3,6 +3,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import ssl
 import sys
 import threading
@@ -30,6 +31,9 @@ LIB_DIR = os.environ.get(
     os.path.join(os.path.dirname(os.path.abspath(WEB_DIR)), "data", "library"),
 )
 MAX_CONTEXT_CHARS = int(os.environ.get("VIBE_MAX_CONTEXT_CHARS", "12000"))
+CHUNK_CHARS = 900
+MAX_CHUNKS = 12
+MAX_DOC_CHARS = 2_000_000
 
 HOP_HEADERS = {
     "connection",
@@ -260,6 +264,62 @@ def fetch_url_text(url):
     return data.decode("utf-8", errors="replace")
 
 
+def _query_terms(text):
+    return list(dict.fromkeys(re.findall(r"[a-zåäöéü0-9]{2,}", text.lower())))
+
+
+def _split_chunks(text, size=CHUNK_CHARS):
+    chunks = []
+    cur = ""
+    for para in text.split("\n"):
+        if cur and len(cur) + len(para) + 1 > size:
+            chunks.append(cur.strip())
+            cur = para
+        else:
+            cur = (cur + "\n" + para) if cur else para
+        while len(cur) > size * 2:
+            chunks.append(cur[:size].strip())
+            cur = cur[size:]
+    if cur.strip():
+        chunks.append(cur.strip())
+    return [c for c in chunks if c]
+
+
+def _select_chunks(docs, terms):
+    all_chunks = []
+    for meta, text in docs:
+        for idx, chunk in enumerate(_split_chunks(text)):
+            all_chunks.append((meta, idx, chunk))
+    if not all_chunks:
+        return [], False
+    lows = [c.lower() for _, _, c in all_chunks]
+    n = len(lows)
+    scored = []
+    for i, low in enumerate(lows):
+        score = 0.0
+        for term in terms:
+            cnt = low.count(term)
+            if cnt:
+                df = sum(1 for l in lows if term in l)
+                score += cnt * (1.0 + n / (1.0 + df))
+        if score:
+            scored.append((score, i))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    picked, used, truncated = [], 0, False
+    for _, i in scored:
+        meta, idx, chunk = all_chunks[i]
+        if used + len(chunk) > MAX_CONTEXT_CHARS:
+            truncated = True
+            continue
+        picked.append((meta, idx, chunk))
+        used += len(chunk) + 40
+        if len(picked) >= MAX_CHUNKS:
+            truncated = len(scored) > len(picked)
+            break
+    picked.sort(key=lambda x: (x[0]["id"], x[1]))
+    return [(meta, chunk) for meta, _, chunk in picked], truncated
+
+
 _lib_lock = threading.Lock()
 
 
@@ -318,39 +378,50 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if "library" not in data:
             return body
         ids = data.pop("library")
-        docs = library_get(ids) if isinstance(ids, list) else []
         payload = json.dumps(data).encode("utf-8")
+        if not isinstance(ids, list) or not ids:
+            return payload
+        docs = library_get(ids)
         if not docs:
             return payload
+
+        question = ""
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            for msg in reversed(messages):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    question = str(msg.get("content", ""))
+                    break
+        terms = _query_terms(question)
+        selected, truncated = _select_chunks(docs, terms)
+
+        by_doc = {}
+        for meta, chunk in selected:
+            by_doc.setdefault(meta["id"], (meta, []))[1].append(chunk)
         parts = []
-        used = 0
-        truncated = False
-        for meta, text in docs:
-            if used >= MAX_CONTEXT_CHARS:
-                truncated = True
-                break
-            chunk = text[: MAX_CONTEXT_CHARS - used]
-            if len(chunk) < len(text):
-                truncated = True
+        for meta, chunks in by_doc.values():
             parts.append(
-                "Dokument: %s (källa: %s)\n%s" % (meta["name"], meta["source"], chunk)
+                "Dokument: %s (källa: %s)\n%s"
+                % (meta["name"], meta["source"], "\n[…]\n".join(chunks))
             )
-            used += len(chunk)
         context = "\n\n".join(parts)
         if truncated:
-            context += "\n\n[Vissa dokument var för stora och har kortats av.]"
+            context += "\n\n[Det fanns fler träffar än som fick plats — tidigaste utdrag visas.]"
+        if not selected:
+            context += "\n\n[Inga sökträffar för frågans ord hittades i dokumenten.]"
         missing = len(ids) - len(docs)
         note = " (%d valda dokument hittades inte)" % missing if missing > 0 else ""
         names = ", ".join(m["name"] for m, _ in docs)
         system_msg = {
             "role": "system",
             "content": (
-                "Använd följande dokument från användarens bibliotek (%s)%s som "
-                "kunskapskälla när du svarar. Svara på användarens språk.\n\n%s"
+                "Nedan följer de mest relevanta utdragen ur användarens "
+                "biblioteksdokument (%s)%s, valda automatiskt utifrån frågan. "
+                "Använd dem som kunskapskälla när du svarar. Om svaret inte finns "
+                "i utdragen, säg det ärligt. Svara på användarens språk.\n\n%s"
                 % (names, note, context)
             ),
         }
-        messages = data.get("messages")
         if isinstance(messages, list):
             data["messages"] = [system_msg] + messages
         return json.dumps(data).encode("utf-8")
@@ -453,7 +524,17 @@ class AdminHandler(BaseHTTPRequestHandler):
         if not data or not data.get("name") or not data.get("content"):
             self._send_json({"error": "namn och innehåll krävs"}, 400)
             return
-        entry = library_add(str(data["name"]), "fil", str(data["content"]))
+        content = str(data["content"])
+        if content.startswith("%PDF") or "\x00" in content[:4096]:
+            self._send_json(
+                {"error": "PDF och binära filer stöds inte ännu — spara som .txt eller kopiera in texten"},
+                400,
+            )
+            return
+        if len(content) > MAX_DOC_CHARS:
+            self._send_json({"error": "för stor fil (max 2 MB text)"}, 400)
+            return
+        entry = library_add(str(data["name"]), "fil", content)
         self._send_json({"ok": True, "doc": entry})
 
     def _lib_add_url(self):
