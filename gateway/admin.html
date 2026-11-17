@@ -74,7 +74,9 @@
     padding: 24px;
     text-align: center;
   }
-  .setfield { margin: 8px 0; }
+  .newkey { background: #10251a; border: 1px solid #2ea043; padding: 10px 12px; border-radius: 6px; margin: 8px 0; word-break: break-all; }
+.newkey code { font-size: 16px; letter-spacing: 1px; }
+.setfield { margin: 8px 0; }
 .setfield label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
 .setfield textarea { width: 100%; box-sizing: border-box; background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 8px; font: inherit; }
 #setsave { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
@@ -215,12 +217,25 @@
 </div>
 <div id="autolist"><div class="empty">Inga automatiskt godkända användare.</div></div>
 
+<h2 class="section">👥 Uppkopplade (senaste 5 min)</h2>
+<div id="clients"><div class="empty">Inga aktiva klienter just nu.</div></div>
+
+<h2 class="section">🔑 Åtkomstnycklar</h2>
+<div class="sub">Skapa nycklar att dela ut. När "Kräv åtkomstnyckel" är på (under Inställningar) måste klienten ange nyckeln för att chatta och se biblioteket. Nyckeln lagras endast som SHA-256-hash — den kan aldrig läsas bakvägen och visas fullständig bara en gång, direkt efter skapandet.</div>
+<div class="urlrow">
+  <input type="text" id="keylabel" placeholder="Namn, t.ex. Arbetsdatorn">
+  <button id="keybtn">Skapa nyckel</button>
+</div>
+<div id="newkey" class="newkey" style="display:none"></div>
+<div id="keylist"><div class="empty">Inga nycklar skapade.</div></div>
+
 <h2 class="section">⚙️ Inställningar</h2>
 <div class="sub">Hälsningen visas som första meddelande när någon öppnar chattsidan. Systeminstruktionen skickas med varje fråga till modellen (t.ex. språkval). Klienterna hämtar ändringarna vid nästa sidomladdning.</div>
 <div class="setfield"><label>Hälsning (första meddelandet i chatten)</label>
   <textarea id="setwelc" rows="2"></textarea></div>
 <div class="setfield"><label>Systeminstruktion till modellen</label>
   <textarea id="setsys" rows="3"></textarea></div>
+<div class="setfield"><label><input type="checkbox" id="setreqkey" style="width:auto"> Kräv åtkomstnyckel för att chatta och använda biblioteket</label></div>
 <button id="setsave">Spara inställningar</button>
 <span id="setmsg"></span>
 
@@ -469,6 +484,7 @@ async function refreshSettings() {
     const s = await fetch("/api/settings").then(r => r.json());
     if (document.activeElement !== setwelc) setwelc.value = s.welcome || "";
     if (document.activeElement !== setsys) setsys.value = s.system_prompt || "";
+    document.getElementById("setreqkey").checked = !!s.require_key;
   } catch {}
 }
 
@@ -477,7 +493,11 @@ setsave.addEventListener("click", async () => {
   const r = await fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ welcome: setwelc.value, system_prompt: setsys.value }),
+    body: JSON.stringify({
+      welcome: setwelc.value,
+      system_prompt: setsys.value,
+      require_key: document.getElementById("setreqkey").checked,
+    }),
   });
   setmsg.textContent = r.ok ? "Sparat \u2713" : "Fel vid sparande";
   setTimeout(() => { setmsg.textContent = ""; }, 3000);
@@ -485,6 +505,71 @@ setsave.addEventListener("click", async () => {
 });
 
 refreshSettings();
+
+
+const keylabel = document.getElementById("keylabel");
+const keybtn = document.getElementById("keybtn");
+const keylist = document.getElementById("keylist");
+const newkeyEl = document.getElementById("newkey");
+const clientsEl = document.getElementById("clients");
+
+async function refreshKeys() {
+  try {
+    const keys = await fetch("/api/keys").then(r => r.json());
+    if (!keys.length) {
+      keylist.innerHTML = `<div class="empty">Inga nycklar skapade.</div>`;
+      return;
+    }
+    keylist.innerHTML = keys.map(k => `
+      <div class="doc">
+        <div class="info"><div class="name">🔑 ${escHtml(k.label)} <span class="c">(${escHtml(k.prefix)}…)</span></div>
+        <div class="meta">Skapad ${escHtml(k.created)} · ${k.uses} användningar · senast ${escHtml(k.last || "-")}</div></div>
+        <button class="del" onclick="delKey('${escHtml(k.id)}')">Ta bort</button>
+      </div>
+    `).join("");
+  } catch {}
+}
+
+keybtn.addEventListener("click", async () => {
+  const label = keylabel.value.trim();
+  if (!label) { newkeyEl.style.display = "block"; newkeyEl.textContent = "Skriv ett namn för nyckeln först."; return; }
+  const r = await fetch("/api/keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+  if (!r.ok) { newkeyEl.style.display = "block"; newkeyEl.textContent = "Kunde inte skapa nyckel."; return; }
+  const { code } = await r.json();
+  newkeyEl.style.display = "block";
+  newkeyEl.innerHTML = `Nyckeln är skapad — <b>visas endast nu</b>, kopiera och dela ut den:<br><code>${escHtml(code)}</code>`;
+  keylabel.value = "";
+  refreshKeys();
+});
+
+async function delKey(id) {
+  await fetch("/api/keys/" + encodeURIComponent(id), { method: "DELETE" });
+  refreshKeys();
+}
+
+async function refreshClients() {
+  try {
+    const rows = await fetch("/api/clients").then(r => r.json());
+    if (!rows.length) {
+      clientsEl.innerHTML = `<div class="empty">Inga aktiva klienter just nu (aktivitet senaste 5 min räknas).</div>`;
+      return;
+    }
+    clientsEl.innerHTML = `<div class="sub"><b>${rows.length} uppkopplade</b></div>` + rows.map(r => `
+      <div class="doc">
+        <div class="info"><div class="name">👥 ${escHtml(r.name)}</div>
+        <div class="meta">${escHtml(r.ip)} · nyckel: ${escHtml(r.key)} · ${r.requests} frågor · sedd för ${r.seconds_ago} s sedan</div></div>
+      </div>
+    `).join("");
+  } catch {}
+}
+
+refreshKeys();
+refreshClients();
+setInterval(refreshClients, 5000);
 
 const testinput = document.getElementById("testinput");
 const testbtn = document.getElementById("testbtn");

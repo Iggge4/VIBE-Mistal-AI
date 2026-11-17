@@ -191,6 +191,15 @@
   <span class="who" id="who"></span>
   <span class="status" id="status">Kontrollerar anslutning&hellip;</span>
 </header>
+<div id="keygate" class="hidden">
+  <div class="gatebox">
+    <h2>Åtkomstnyckel krävs</h2>
+    <p>Den här servern kräver en åtkomstnyckel. Fråga värddatorn efter koden.</p>
+    <input type="text" id="keyinput" maxlength="80" placeholder="Nyckel, t.ex. VIBE-1A2B3C4D…" autofocus>
+    <button id="keybtn">Lås upp</button>
+    <div class="gateerr" id="keyerr"></div>
+  </div>
+</div>
 <div id="namegate">
   <div class="gatebox">
     <h2>Vad heter du?</h2>
@@ -222,6 +231,41 @@ const whoEl = document.getElementById("who");
 
 let userName = "";
 try { userName = localStorage.getItem("vibe_name") || ""; } catch {}
+let apiKey = "";
+try { apiKey = localStorage.getItem("vibe_key") || ""; } catch {}
+
+const keygate = document.getElementById("keygate");
+const keyinput = document.getElementById("keyinput");
+const keybtn = document.getElementById("keybtn");
+const keyerr = document.getElementById("keyerr");
+
+function showKeyGate() {
+  keygate.classList.remove("hidden");
+  if (namegate.classList.contains("hidden")) keyinput.focus();
+}
+
+keybtn.addEventListener("click", () => {
+  const code = keyinput.value.trim();
+  if (!code) {
+    keyerr.textContent = "Du måste klistra in nyckeln.";
+    return;
+  }
+  apiKey = code;
+  try { localStorage.setItem("vibe_key", code); } catch {}
+  keygate.classList.add("hidden");
+  keyerr.textContent = "";
+  refreshLibrary();
+});
+keyinput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") keybtn.click();
+});
+
+function apiFetch(url, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers || {});
+  if (apiKey) opts.headers["X-API-Key"] = apiKey;
+  return fetch(url, opts);
+}
 
 function applyName() {
   whoEl.textContent = userName ? "Användare: " + userName : "";
@@ -264,7 +308,9 @@ function updateLibLabel() {
 
 async function refreshLibrary() {
   try {
-    const docs = await fetch("/v1/library").then(r => r.json());
+    const lr = await apiFetch("/v1/library");
+    if (lr.status === 401) throw new Error("401");
+    const docs = await lr.json();
     if (!docs.length) {
       liblist.innerHTML = '<span class="none">Biblioteket är tomt — värddatorn kan lägga in dokument via sin panel.</span>';
       return;
@@ -280,8 +326,9 @@ async function refreshLibrary() {
     liblist.querySelectorAll("input").forEach(cb => {
       if (saved.includes(cb.value)) cb.checked = true;
     });
-  } catch {
-    liblist.innerHTML = '<span class="none">Kunde inte läsa biblioteket.</span>';
+  } catch (err) {
+    if (String(err).includes("401")) { showKeyGate(); }
+    liblist.innerHTML = '<span class="none">Kunde inte läsa biblioteket' + (apiKey ? "." : " — åtkomstnyckel krävs.") + '</span>';
   }
   updateLibLabel();
 }
@@ -342,7 +389,7 @@ async function ask(question) {
   }, 8000);
   send.disabled = true;
   try {
-    const r = await fetch("/v1/chat/completions", {
+    const r = await apiFetch("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -355,7 +402,14 @@ async function ask(question) {
     });
     if (!r.ok) {
       const data = await r.json().catch(() => null);
-      throw new Error(data?.error?.message || ("HTTP " + r.status));
+      const msg = data?.error?.message || ("HTTP " + r.status);
+      if (r.status === 401) {
+        apiKey = "";
+        try { localStorage.removeItem("vibe_key"); } catch {}
+        showKeyGate();
+        throw new Error("Åtkomstnyckeln är ogiltig — ange en ny.");
+      }
+      throw new Error(msg);
     }
     const reader = r.body.getReader();
     const dec = new TextDecoder();
@@ -448,6 +502,7 @@ async function loadSettings() {
       const first = chat.querySelector(".msg.ai");
       if (first && !history.length) first.textContent = s.welcome;
     }
+    if (s.require_key && !apiKey) showKeyGate();
   } catch {}
 }
 loadSettings();

@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import shutil
 import ssl
 import subprocess
@@ -44,7 +45,15 @@ DEFAULT_SETTINGS = {
         "Du är en hjälpsam AI-assistent. Svara alltid på svenska, även om "
         "frågan ställs på ett annat språk."
     ),
+    "require_key": False,
 }
+KEYS_FILE = os.environ.get(
+    "VIBE_KEYS_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(STATE_FILE)), "keys.json"),
+)
+ACTIVE_WINDOW = int(os.environ.get("VIBE_ACTIVE_WINDOW", "300"))
+ACTIVE = {}
+ACTIVE_LOCK = threading.Lock()
 LIB_DIR = os.environ.get(
     "VIBE_LIB_DIR",
     os.path.join(os.path.dirname(os.path.abspath(WEB_DIR)), "data", "library"),
@@ -431,8 +440,11 @@ def settings_get():
         return data
     if isinstance(saved, dict):
         for key in DEFAULT_SETTINGS:
-            if isinstance(saved.get(key), str):
-                data[key] = saved[key]
+            val = saved.get(key)
+            if isinstance(val, bool):
+                data[key] = val
+            elif isinstance(val, str) and isinstance(DEFAULT_SETTINGS[key], str):
+                data[key] = val
     return data
 
 
@@ -441,18 +453,122 @@ def settings_set(update):
         raise ValueError("objekt krävs")
     current = settings_get()
     for key in DEFAULT_SETTINGS:
-        if key in update:
-            val = str(update[key] or "").strip()
-            limit = 500 if key == "welcome" else 2000
-            if len(val) > limit:
-                raise ValueError("för lång text (max %d tecken)" % limit)
-            current[key] = val
+        if key not in update:
+            continue
+        if isinstance(DEFAULT_SETTINGS[key], bool):
+            current[key] = bool(update[key])
+            continue
+        val = str(update[key] or "").strip()
+        limit = 500 if key == "welcome" else 2000
+        if len(val) > limit:
+            raise ValueError("för lång text (max %d tecken)" % limit)
+        current[key] = val
     os.makedirs(os.path.dirname(SETTINGS_FILE) or ".", exist_ok=True)
     tmp = SETTINGS_FILE + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(current, fh, ensure_ascii=False, indent=1)
     os.replace(tmp, SETTINGS_FILE)
     return current
+
+
+def _keys_path():
+    return KEYS_FILE
+
+
+def keys_list():
+    try:
+        with open(_keys_path()) as fh:
+            data = json.load(fh)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_keys(keys):
+    os.makedirs(os.path.dirname(_keys_path()) or ".", exist_ok=True)
+    tmp = _keys_path() + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(keys, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, _keys_path())
+
+
+def key_create(label):
+    code = "VIBE-" + secrets.token_hex(9).upper()
+    entry = {
+        "id": hashlib.sha256(code.encode()).hexdigest()[:12],
+        "label": str(label).strip()[:60] or "nyckel",
+        "hash": hashlib.sha256(code.encode()).hexdigest(),
+        "prefix": code[:10],
+        "created": time.strftime("%Y-%m-%d %H:%M"),
+        "uses": 0,
+        "last": "",
+    }
+    with _lib_lock:
+        keys = keys_list()
+        keys.append(entry)
+        _save_keys(keys)
+    return code, {k: v for k, v in entry.items() if k != "hash"}
+
+
+def key_revoke(kid):
+    with _lib_lock:
+        keys = keys_list()
+        remaining = [k for k in keys if k.get("id") != kid]
+        if len(remaining) != len(keys):
+            _save_keys(remaining)
+            return True
+    return False
+
+
+def key_check(code):
+    code = (code or "").strip()
+    if not code:
+        return None
+    h = hashlib.sha256(code.encode()).hexdigest()
+    with _lib_lock:
+        keys = keys_list()
+        for k in keys:
+            if k.get("hash") == h:
+                k["uses"] = int(k.get("uses", 0)) + 1
+                k["last"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                _save_keys(keys)
+                return k
+    return None
+
+
+def keys_public():
+    return [{k: v for k, v in e.items() if k != "hash"} for e in keys_list()]
+
+
+def client_seen(name, key_label, ip):
+    now = time.time()
+    ident = "%s|%s|%s" % (ip, name or "-", key_label or "-")
+    with ACTIVE_LOCK:
+        prev = ACTIVE.get(ident) or {"requests": 0}
+        ACTIVE[ident] = {
+            "ip": ip,
+            "name": name or "-",
+            "key": key_label or "-",
+            "requests": prev["requests"] + 1,
+            "last": now,
+        }
+
+
+def clients_view():
+    now = time.time()
+    with ACTIVE_LOCK:
+        live = {}
+        for ident, v in ACTIVE.items():
+            if now - v["last"] <= ACTIVE_WINDOW:
+                live[ident] = v
+        ACTIVE.clear()
+        ACTIVE.update(live)
+        rows = [dict(v) for v in live.values()]
+    rows.sort(key=lambda r: -r["last"])
+    for r in rows:
+        r["seconds_ago"] = int(now - r["last"])
+        del r["last"]
+    return rows
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -485,6 +601,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         with open(full, "rb") as fh:
             payload = fh.read()
         self._send_bytes(200, payload, ctype)
+
+    def _key_gate(self):
+        if not settings_get().get("require_key"):
+            return None
+        entry = key_check(self.headers.get("X-API-Key", ""))
+        if entry is not None:
+            return entry
+        self._error_payload(401, "ogiltig eller saknad åtkomstnyckel")
+        return False
 
     def _await_approval(self, ip, endpoint, size, body_sha, name=""):
         rid = STATE.register(ip, endpoint, size, body_sha, name)
@@ -597,6 +722,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self._serve_static(WEB_DIR)
                 return
             if path == "/v1/library":
+                if self._key_gate() is False:
+                    return
                 self._send_bytes(
                     200,
                     json.dumps(library_list(), ensure_ascii=False).encode("utf-8"),
@@ -624,6 +751,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             body = self._apply_library(body)
+
+        if self.command == "POST":
+            kentry = self._key_gate()
+            if kentry is False:
+                return
+            client_seen(
+                client_name,
+                (kentry or {}).get("label", ""),
+                self.client_address[0],
+            )
 
         if self.command == "POST" and REQUIRE_APPROVAL:
             client_ip = self.client_address[0]
@@ -712,6 +849,10 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._send_json(library_list())
         elif path == "/api/autoapprove":
             self._send_json(auto_list())
+        elif path == "/api/keys":
+            self._send_json(keys_public())
+        elif path == "/api/clients":
+            self._send_json(clients_view())
         elif path == "/api/settings":
             self._send_json(settings_get())
         else:
@@ -827,6 +968,11 @@ class AdminHandler(BaseHTTPRequestHandler):
                 return
             names = auto_add(name)
             self._send_json({"ok": True, "users": names})
+        elif path == "api/keys":
+            data = self._read_json_body()
+            label = (data or {}).get("label", "").strip() if data else ""
+            code, entry = key_create(label)
+            self._send_json({"ok": True, "code": code, "key": entry})
         elif path == "api/settings":
             data = self._read_json_body()
             try:
@@ -848,6 +994,9 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": ok})
         elif len(parts) == 3 and parts[0] == "api" and parts[1] == "autoapprove":
             ok = auto_remove(urllib.parse.unquote(parts[2]))
+            self._send_json({"ok": ok})
+        elif len(parts) == 3 and parts[0] == "api" and parts[1] == "keys":
+            ok = key_revoke(parts[2])
             self._send_json({"ok": ok})
         else:
             self._send_json({"error": "not found"}, 404)

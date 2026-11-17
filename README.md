@@ -187,6 +187,19 @@ systeminstruktion som skickas med varje fråga till modellen (t.ex.
 "Svara alltid på svenska"). Standard är svensk instruktion och
 "Hej! Jag är din lokala Mistral AI. Ställ en fråga för att börja."
 
+## Åtkomstnycklar
+
+I värdpanelen (🔑 Åtkomstnycklar) skapar du nycklar att dela ut
+till klienterna, t.ex. en per person eller enhet. Nyckeln ser ut som
+`VIBE-XXXXXXXXXX…` och visas fullständig endast en gång, direkt efter
+skapandet — i panelen lagras den endast som SHA-256-hash och kan
+aldrig läsas bakvägen. Bocka i ”Kräv åtkomstnyckel” under
+Inställningar: då krävs giltig nyckel för att chatta och se
+biblioteket (401 annars). Panelen visas hur många gånger vardera
+nyckel använts, och under 👥 Uppkopplade ser du vilka klienter som
+varit aktiva de senaste 5 minuterna (namn, IP, nyckel, antal frågor).
+Förlorad nyckel avslutas enkelt med Ta bort.
+
 ## Strömning
 
 Chattsvaren strömmas (SSE): modellens ord skrivs ut löpande i chatten
