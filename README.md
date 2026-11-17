@@ -191,8 +191,11 @@ systeminstruktion som skickas med varje fråga till modellen (t.ex.
 
 I värdpanelen (🖥️ Beräkning) väljer du CPU eller GPU och antal
 modellager på GPU:n (999 = alla). Spara + starta om går direkt från
-panelen. Obs: GPU-läget kräver att snapet byggts med CUDA-stöd — med
-nuvarande CPU-bygge faller GPU-val automatiskt tillbaka på CPU.
+panelen. GPU-läget bygger på Vulkan-backend (inte CUDA) och fungerar
+med både NVIDIA och AMD — din Radeon använder Mesa RADV-drivrutinen.
+Loader (libvulkan1) medföljer snapet; GPU-drivrutinen kommer från
+värdsystemet. Kontrollera att din GPU syns med `vulkaninfo --summary`
+innan du växlar i panelen.
 
 ## Hastighet
 
