@@ -187,6 +187,15 @@ systeminstruktion som skickas med varje fråga till modellen (t.ex.
 "Svara alltid på svenska"). Standard är svensk instruktion och
 "Hej! Jag är din lokala Mistral AI. Ställ en fråga för att börja."
 
+## Hastighet
+
+Bygget är optimerat för den CPU som bygger snapet (AVX2/AVX-512 via
+GGML_NATIVE). Bygg därför snapet på samma maskin som ska köra det.
+På en modern 8-kärnig CPU med 8 trådar kan räkna med ungefär 150–250
+tokens/s inläsning och 15–25 tokens/s utskrivning för 7B Q4. Stor
+biblioteksmängd gör inläsningen längre — sänk `VIBE_MAX_CONTEXT_CHARS`
+(standard 16000) i `bin/start-gateway.sh` för snabbare svar.
+
 ## Åtkomstnycklar
 
 I värdpanelen (🔑 Åtkomstnycklar) skapar du nycklar att dela ut

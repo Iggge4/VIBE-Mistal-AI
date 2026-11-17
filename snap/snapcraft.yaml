@@ -1,6 +1,6 @@
 name: vibe-mistral-ai
 base: core22
-version: "0.3.9"
+version: "0.4.0"
 summary: Lokal Mistral AI-server i snap med krypterat HTTPS-API
 description: |
   Kör en lokal Mistral 7B Instruct-modell (GGUF via llama.cpp) i en
@@ -34,7 +34,7 @@ parts:
     source-tag: v1.0.0
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
-      - -DGGML_NATIVE=OFF
+      - -DGGML_NATIVE=ON
       - -DLLAMA_CURL=OFF
       - -DLLAMA_BUILD_TESTS=OFF
       - -DLLAMA_BUILD_SERVER=ON

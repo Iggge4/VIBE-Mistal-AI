@@ -25,6 +25,8 @@ if [ -z "$THREADS" ]; then
     fi
 fi
 
+echo "[llamaserver] Startar med $THREADS trådar, kontext ${VIBE_CTX:-8192}"
+
 exec "$SERVER" \
     -m "$MODEL" \
     --host 127.0.0.1 \
