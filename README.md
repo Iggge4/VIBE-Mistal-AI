@@ -179,6 +179,13 @@ och gäller även efter sidomladdning; knappen visar antal valda
 (”📚 Bibliotek (1 valda)”) och chatten visar noten ”Skickar med
 bibliotek: …” vid varje fråga.
 
+## Strömning
+
+Chattsvaren strömmas (SSE): modellens ord skrivs ut löpande i chatten
+istället för att allt kommer i slutet. Med bibliotek på CPU tar det
+först en stund innan första ordet visas (modellen läser igenom
+utdragen) — därefter ser du svaret växa fram i realtid.
+
 ## Tjänster
 
 ```bash

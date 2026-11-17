@@ -598,11 +598,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 req.add_header(name, value)
         try:
             with urllib.request.urlopen(req, timeout=600) as resp:
-                payload = resp.read()
+                ctype = resp.headers.get("Content-Type", "")
                 self.send_response(resp.status)
                 for name, value in resp.headers.items():
                     if name.lower() not in HOP_HEADERS:
                         self.send_header(name, value)
+                if "text/event-stream" in ctype:
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.close_connection = True
+                    while True:
+                        chunk = resp.read1(8192)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                    return
+                payload = resp.read()
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)

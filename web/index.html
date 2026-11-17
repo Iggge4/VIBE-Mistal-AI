@@ -348,18 +348,51 @@ async function ask(question) {
       body: JSON.stringify({
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...history],
         max_tokens: 1024,
-        stream: false,
+        stream: true,
         library: sel,
         client_name: userName,
       }),
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data?.error?.message || ("HTTP " + r.status));
-    const answer = data.choices?.[0]?.message?.content?.trim() || "(tomt svar)";
+    if (!r.ok) {
+      const data = await r.json().catch(() => null);
+      throw new Error(data?.error?.message || ("HTTP " + r.status));
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let answer = "";
+    let first = true;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") continue;
+        try {
+          const j = JSON.parse(payload);
+          const delta = j.choices?.[0]?.delta?.content || "";
+          if (delta) {
+            if (first) {
+              clearTimeout(thinkTimer);
+              bubble.classList.remove("loading");
+              first = false;
+            }
+            answer += delta;
+            bubble.textContent = answer;
+            chat.scrollTop = chat.scrollHeight;
+          }
+        } catch {}
+      }
+    }
     clearTimeout(thinkTimer);
-    bubble.textContent = answer;
     bubble.classList.remove("loading");
-    history.push({ role: "assistant", content: answer });
+    bubble.textContent = answer.trim() || "(tomt svar)";
+    history.push({ role: "assistant", content: bubble.textContent });
   } catch (err) {
     const msg = err.message || "";
     if (msg.includes("denied")) {
