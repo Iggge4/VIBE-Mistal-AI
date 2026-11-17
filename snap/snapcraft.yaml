@@ -1,6 +1,6 @@
 name: vibe-mistral-ai
 base: core22
-version: "0.4.2"
+version: "0.5.0"
 summary: Lokal Mistral AI-server i snap med krypterat HTTPS-API
 description: |
   Kör en lokal Mistral 7B Instruct-modell (GGUF via llama.cpp) i en
@@ -28,13 +28,33 @@ apps:
     command: bin/open-ui.sh
 
 parts:
+  shaderc:
+    plugin: cmake
+    source: https://github.com/google/shaderc.git
+    cmake-parameters:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSHADERC_SKIP_TESTS=ON
+      - -DSHADERC_SKIP_EXAMPLES=ON
+      - -DSHADERC_SKIP_COPYRIGHT_CHECK=ON
+      - -DBUILD_SHARED_LIBS=OFF
+    build-packages:
+      - build-essential
+      - cmake
+      - git
+      - python3
+      - ninja-build
+    override-pull: |
+      snapcraftctl pull
+      utils/git-sync-deps
   llama-cpp:
     plugin: cmake
     source: https://github.com/ggerganov/llama.cpp.git
     source-tag: v1.0.0
+    after: [shaderc]
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
       - -DGGML_NATIVE=ON
+      - -DGGML_VULKAN=ON
       - -DLLAMA_CURL=OFF
       - -DLLAMA_BUILD_TESTS=OFF
       - -DLLAMA_BUILD_SERVER=ON
@@ -42,6 +62,14 @@ parts:
       - build-essential
       - cmake
       - git
+      - libvulkan-dev
+      - spirv-headers
+    stage-packages:
+      - libvulkan1
+    override-build: |
+      export PATH="$CRAFT_STAGE/bin:$PATH"
+      command -v glslc || { echo "glslc saknas i bygget" >&2; exit 1; }
+      snapcraftctl build
   app-files:
     plugin: dump
     source: .
