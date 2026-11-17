@@ -749,7 +749,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                     "terms": terms,
                     "truncated": truncated,
                     "chunks": [
-                        {"doc": meta["name"], "text": chunk[:600]}
+                        {"doc": meta["name"], "text": chunk}
                         for meta, chunk in selected
                     ],
                 }
