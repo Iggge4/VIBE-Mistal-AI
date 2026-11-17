@@ -179,6 +179,14 @@ och gäller även efter sidomladdning; knappen visar antal valda
 (”📚 Bibliotek (1 valda)”) och chatten visar noten ”Skickar med
 bibliotek: …” vid varje fråga.
 
+## Inställningar
+
+I värdpanelen (⚙️ Inställningar) kan du ändra hälsningen som
+visas som första meddelande när någon öppnar chattsidan, samt den
+systeminstruktion som skickas med varje fråga till modellen (t.ex.
+"Svara alltid på svenska"). Standard är svensk instruktion och
+"Hej! Jag är din lokala Mistral AI. Ställ en fråga för att börja."
+
 ## Strömning
 
 Chattsvaren strömmas (SSE): modellens ord skrivs ut löpande i chatten

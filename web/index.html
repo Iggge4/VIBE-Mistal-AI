@@ -296,7 +296,7 @@ liblist.addEventListener("change", () => {
 });
 
 const history = [];
-const SYSTEM_PROMPT = "Du är en hjälpsam AI-assistent. Svara på samma språk som användaren skriver.";
+let SYSTEM_PROMPT = "Du är en hjälpsam AI-assistent. Svara alltid på svenska, även om frågan ställs på ett annat språk.";
 
 function addMsg(role, text, loading) {
   const div = document.createElement("div");
@@ -439,6 +439,18 @@ clearBtn.addEventListener("click", () => {
 checkHealth();
 setInterval(checkHealth, 30000);
 refreshLibrary();
+
+async function loadSettings() {
+  try {
+    const s = await fetch("/v1/settings").then(r => r.json());
+    if (s.system_prompt) SYSTEM_PROMPT = s.system_prompt;
+    if (s.welcome) {
+      const first = chat.querySelector(".msg.ai");
+      if (first && !history.length) first.textContent = s.welcome;
+    }
+  } catch {}
+}
+loadSettings();
 </script>
 </body>
 </html>

@@ -74,7 +74,12 @@
     padding: 24px;
     text-align: center;
   }
-  .note {
+  .setfield { margin: 8px 0; }
+.setfield label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+.setfield textarea { width: 100%; box-sizing: border-box; background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 8px; font: inherit; }
+#setsave { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+#setmsg { margin-left: 10px; font-size: 13px; color: #3fb950; }
+.note {
     margin-top: 28px;
     padding: 14px 16px;
     background: var(--panel);
@@ -209,6 +214,15 @@
   <button id="autobtn">Lägg till</button>
 </div>
 <div id="autolist"><div class="empty">Inga automatiskt godkända användare.</div></div>
+
+<h2 class="section">⚙️ Inställningar</h2>
+<div class="sub">Hälsningen visas som första meddelande när någon öppnar chattsidan. Systeminstruktionen skickas med varje fråga till modellen (t.ex. språkval). Klienterna hämtar ändringarna vid nästa sidomladdning.</div>
+<div class="setfield"><label>Hälsning (första meddelandet i chatten)</label>
+  <textarea id="setwelc" rows="2"></textarea></div>
+<div class="setfield"><label>Systeminstruktion till modellen</label>
+  <textarea id="setsys" rows="3"></textarea></div>
+<button id="setsave">Spara inställningar</button>
+<span id="setmsg"></span>
 
 <div class="note">
   🔒 Integritet: varje rad visar endast tid, käll-IP, endpoint, storlek i byte
@@ -444,6 +458,33 @@ async function delAuto(name) {
 
 refreshAuto();
 setInterval(refreshAuto, 5000);
+
+const setwelc = document.getElementById("setwelc");
+const setsys = document.getElementById("setsys");
+const setsave = document.getElementById("setsave");
+const setmsg = document.getElementById("setmsg");
+
+async function refreshSettings() {
+  try {
+    const s = await fetch("/api/settings").then(r => r.json());
+    if (document.activeElement !== setwelc) setwelc.value = s.welcome || "";
+    if (document.activeElement !== setsys) setsys.value = s.system_prompt || "";
+  } catch {}
+}
+
+setsave.addEventListener("click", async () => {
+  setmsg.textContent = "Sparar\u2026";
+  const r = await fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ welcome: setwelc.value, system_prompt: setsys.value }),
+  });
+  setmsg.textContent = r.ok ? "Sparat \u2713" : "Fel vid sparande";
+  setTimeout(() => { setmsg.textContent = ""; }, 3000);
+  refreshSettings();
+});
+
+refreshSettings();
 
 const testinput = document.getElementById("testinput");
 const testbtn = document.getElementById("testbtn");

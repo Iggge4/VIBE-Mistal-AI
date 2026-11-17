@@ -34,6 +34,17 @@ AUTO_FILE = os.environ.get(
     "VIBE_AUTO_FILE",
     os.path.join(os.path.dirname(os.path.abspath(STATE_FILE)), "autoapprove.json"),
 )
+SETTINGS_FILE = os.environ.get(
+    "VIBE_SETTINGS_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(STATE_FILE)), "settings.json"),
+)
+DEFAULT_SETTINGS = {
+    "welcome": "Hej! Jag är din lokala Mistral AI. Ställ en fråga för att börja.",
+    "system_prompt": (
+        "Du är en hjälpsam AI-assistent. Svara alltid på svenska, även om "
+        "frågan ställs på ett annat språk."
+    ),
+}
 LIB_DIR = os.environ.get(
     "VIBE_LIB_DIR",
     os.path.join(os.path.dirname(os.path.abspath(WEB_DIR)), "data", "library"),
@@ -411,6 +422,39 @@ def auto_check(name):
     return name.strip().lower() in (n.strip().lower() for n in auto_list())
 
 
+def settings_get():
+    data = dict(DEFAULT_SETTINGS)
+    try:
+        with open(SETTINGS_FILE) as fh:
+            saved = json.load(fh)
+    except Exception:
+        return data
+    if isinstance(saved, dict):
+        for key in DEFAULT_SETTINGS:
+            if isinstance(saved.get(key), str):
+                data[key] = saved[key]
+    return data
+
+
+def settings_set(update):
+    if not isinstance(update, dict):
+        raise ValueError("objekt krävs")
+    current = settings_get()
+    for key in DEFAULT_SETTINGS:
+        if key in update:
+            val = str(update[key] or "").strip()
+            limit = 500 if key == "welcome" else 2000
+            if len(val) > limit:
+                raise ValueError("för lång text (max %d tecken)" % limit)
+            current[key] = val
+    os.makedirs(os.path.dirname(SETTINGS_FILE) or ".", exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(current, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, SETTINGS_FILE)
+    return current
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -559,6 +603,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     "application/json",
                 )
                 return
+            if path == "/v1/settings":
+                self._send_bytes(
+                    200,
+                    json.dumps(settings_get(), ensure_ascii=False).encode("utf-8"),
+                    "application/json",
+                )
+                return
 
         length = int(self.headers.get("Content-Length", 0) or 0)
         body = self.rfile.read(length) if length else None
@@ -661,6 +712,8 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._send_json(library_list())
         elif path == "/api/autoapprove":
             self._send_json(auto_list())
+        elif path == "/api/settings":
+            self._send_json(settings_get())
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -774,6 +827,17 @@ class AdminHandler(BaseHTTPRequestHandler):
                 return
             names = auto_add(name)
             self._send_json({"ok": True, "users": names})
+        elif path == "api/settings":
+            data = self._read_json_body()
+            try:
+                saved = settings_set(data)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except Exception:
+                self._send_json({"error": "kunde inte spara"}, 500)
+                return
+            self._send_json({"ok": True, "settings": saved})
         else:
             self._send_json({"error": "not found"}, 404)
 
