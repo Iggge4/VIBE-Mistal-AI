@@ -174,7 +174,10 @@ ställ din fråga. Klienten ser bara namn och storlek — aldrig innehållet.
 Vid godkänd förfrågan stoppar gatewayen in dokumenttexten som
 systemkontext (de mest relevanta utdragen, max ~12 000 tecken totalt)
 innan den skickas vidare till modellen. Även biblioteksförfrågningar
-passerar godkännandeflödet som vanligt.
+passerar godkännandeflödet som vanligt. Ditt val sparas i webbläsaren
+och gäller även efter sidomladdning; knappen visar antal valda
+(”📚 Bibliotek (1 valda)”) och chatten visar noten ”Skickar med
+bibliotek: …” vid varje fråga.
 
 ## Tjänster
 

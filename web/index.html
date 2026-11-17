@@ -274,6 +274,9 @@ async function refreshLibrary() {
     ).join("");
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem("vibe_lib_sel") || "[]"); } catch {}
+    const valid = new Set(docs.map(d => d.id));
+    saved = saved.filter(id => valid.has(id));
+    try { localStorage.setItem("vibe_lib_sel", JSON.stringify(saved)); } catch {}
     liblist.querySelectorAll("input").forEach(cb => {
       if (saved.includes(cb.value)) cb.checked = true;
     });
@@ -402,6 +405,7 @@ clearBtn.addEventListener("click", () => {
 
 checkHealth();
 setInterval(checkHealth, 30000);
+refreshLibrary();
 </script>
 </body>
 </html>
