@@ -46,6 +46,8 @@ DEFAULT_SETTINGS = {
         "frågan ställs på ett annat språk."
     ),
     "require_key": False,
+    "compute_mode": "cpu",
+    "gpu_layers": 999,
 }
 KEYS_FILE = os.environ.get(
     "VIBE_KEYS_FILE",
@@ -445,6 +447,11 @@ def settings_get():
                 data[key] = val
             elif isinstance(val, str) and isinstance(DEFAULT_SETTINGS[key], str):
                 data[key] = val
+            elif isinstance(DEFAULT_SETTINGS[key], int):
+                try:
+                    data[key] = int(val)
+                except (TypeError, ValueError):
+                    pass
     return data
 
 
@@ -457,6 +464,15 @@ def settings_set(update):
             continue
         if isinstance(DEFAULT_SETTINGS[key], bool):
             current[key] = bool(update[key])
+            continue
+        if isinstance(DEFAULT_SETTINGS[key], int):
+            try:
+                num = int(update[key])
+            except (TypeError, ValueError):
+                raise ValueError("%s måste vara ett tal" % key)
+            if key == "gpu_layers" and not 0 <= num <= 999:
+                raise ValueError("gpu_layers måste vara 0–999")
+            current[key] = num
             continue
         val = str(update[key] or "").strip()
         limit = 500 if key == "welcome" else 2000
@@ -968,6 +984,15 @@ class AdminHandler(BaseHTTPRequestHandler):
                 return
             names = auto_add(name)
             self._send_json({"ok": True, "users": names})
+        elif path == "api/restart-llama":
+            try:
+                rc = subprocess.call(
+                    ["snapctl", "restart", "vibe-mistral-ai.llamaserver"]
+                )
+            except FileNotFoundError:
+                self._send_json({"ok": False, "error": "snapctl saknas (kör utan snap?)"})
+                return
+            self._send_json({"ok": rc == 0, "snapctl_rc": rc})
         elif path == "api/keys":
             data = self._read_json_body()
             label = (data or {}).get("label", "").strip() if data else ""

@@ -25,11 +25,36 @@ if [ -z "$THREADS" ]; then
     fi
 fi
 
+SETTINGS="$DATA_DIR/settings.json"
+MODE="cpu"
+NGL=0
+if [ -f "$SETTINGS" ]; then
+    MODE_NGL=$(python3 - "$SETTINGS" <<'PYREAD'
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        d = json.load(fh)
+except Exception:
+    print("cpu 0")
+    sys.exit()
+mode = "gpu" if d.get("compute_mode") == "gpu" else "cpu"
+try:
+    ngl = int(d.get("gpu_layers", 0))
+except (TypeError, ValueError):
+    ngl = 0
+print(mode, ngl)
+PYREAD
+) && MODE=$(echo "$MODE_NGL" | cut -d' ' -f1) && NGL=$(echo "$MODE_NGL" | cut -d' ' -f2)
+fi
+
 echo "[llamaserver] Startar med $THREADS trådar, kontext ${VIBE_CTX:-8192}"
 
-exec "$SERVER" \
-    -m "$MODEL" \
-    --host 127.0.0.1 \
-    --port 8080 \
-    -c "${VIBE_CTX:-8192}" \
-    -t "$THREADS"
+ARGS=( -m "$MODEL" --host 127.0.0.1 --port 8080 -c "${VIBE_CTX:-8192}" -t "$THREADS" )
+if [ "$MODE" = "gpu" ] && [ "$NGL" -ge 1 ] 2>/dev/null; then
+    echo "[llamaserver] GPU-läge: $NGL lager på GPU"
+    ARGS+=( -ngl "$NGL" )
+else
+    echo "[llamaserver] CPU-läge"
+fi
+
+exec "$SERVER" "${ARGS[@]}"

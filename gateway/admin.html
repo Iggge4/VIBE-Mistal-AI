@@ -79,7 +79,8 @@
 .setfield { margin: 8px 0; }
 .setfield label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
 .setfield textarea { width: 100%; box-sizing: border-box; background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 8px; font: inherit; }
-#setsave { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+#setsave, #modesave { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+#setmode { background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 8px; font: inherit; }
 #setmsg { margin-left: 10px; font-size: 13px; color: #3fb950; }
 .note {
     margin-top: 28px;
@@ -216,6 +217,18 @@
   <button id="autobtn">Lägg till</button>
 </div>
 <div id="autolist"><div class="empty">Inga automatiskt godkända användare.</div></div>
+
+<h2 class="section">🖥️ Beräkning</h2>
+<div class="sub">Välj var modellen ska köras. CPU är nuvarande standard. GPU-alternativet kräver att snapet byggts med CUDA-stöd — annars faller allt tillbaka på CPU. ändringen kräver omstart av modellen (knappen gör båda: sparar och startar om, tar några sekunder).</div>
+<div class="urlrow">
+  <select id="setmode" style="flex:0 0 auto">
+    <option value="cpu">CPU</option>
+    <option value="gpu">GPU</option>
+  </select>
+  <input type="number" id="setngl" min="0" max="999" value="999" style="flex:0 0 110px" title="Antal lager på GPU (999 = alla)">
+  <button id="modesave">Spara och starta om modellen</button>
+  <span id="modemsg"></span>
+</div>
 
 <h2 class="section">👥 Uppkopplade (senaste 5 min)</h2>
 <div id="clients"><div class="empty">Inga aktiva klienter just nu.</div></div>
@@ -485,6 +498,10 @@ async function refreshSettings() {
     if (document.activeElement !== setwelc) setwelc.value = s.welcome || "";
     if (document.activeElement !== setsys) setsys.value = s.system_prompt || "";
     document.getElementById("setreqkey").checked = !!s.require_key;
+    if (document.activeElement !== document.getElementById("setmode")) {
+      document.getElementById("setmode").value = (s.compute_mode === "gpu") ? "gpu" : "cpu";
+      document.getElementById("setngl").value = s.gpu_layers != null ? s.gpu_layers : 999;
+    }
   } catch {}
 }
 
@@ -570,6 +587,35 @@ async function refreshClients() {
 refreshKeys();
 refreshClients();
 setInterval(refreshClients, 5000);
+
+
+const setmode = document.getElementById("setmode");
+const setngl = document.getElementById("setngl");
+const modesave = document.getElementById("modesave");
+const modemsg = document.getElementById("modemsg");
+
+modesave.addEventListener("click", async () => {
+  modesave.disabled = true;
+  modemsg.textContent = "Sparar och startar om (10–60 s)…";
+  try {
+    const r1 = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        compute_mode: setmode.value,
+        gpu_layers: parseInt(setngl.value, 10) || 0,
+      }),
+    });
+    if (!r1.ok) throw new Error("sparandeMisslyckades");
+    const r2 = await fetch("/api/restart-llama", { method: "POST" });
+    const j2 = await r2.json().catch(() => ({}));
+    modemsg.textContent = (r2.ok && j2.ok) ? "Startad om ✓" : "Sparat, men omstarten misslyckades";
+  } catch (e) {
+    modemsg.textContent = "Fel: " + e.message;
+  }
+  modesave.disabled = false;
+  setTimeout(() => { modemsg.textContent = ""; }, 5000);
+});
 
 const testinput = document.getElementById("testinput");
 const testbtn = document.getElementById("testbtn");

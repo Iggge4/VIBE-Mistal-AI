@@ -187,6 +187,13 @@ systeminstruktion som skickas med varje fråga till modellen (t.ex.
 "Svara alltid på svenska"). Standard är svensk instruktion och
 "Hej! Jag är din lokala Mistral AI. Ställ en fråga för att börja."
 
+## Beräkning: CPU eller GPU
+
+I värdpanelen (🖥️ Beräkning) väljer du CPU eller GPU och antal
+modellager på GPU:n (999 = alla). Spara + starta om går direkt från
+panelen. Obs: GPU-läget kräver att snapet byggts med CUDA-stöd — med
+nuvarande CPU-bygge faller GPU-val automatiskt tillbaka på CPU.
+
 ## Hastighet
 
 Bygget är optimerat för den CPU som bygger snapet (AVX2/AVX-512 via
