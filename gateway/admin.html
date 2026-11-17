@@ -147,6 +147,27 @@
   .libmsg { font-size: 0.85rem; margin: 6px 0 14px; min-height: 1.2em; }
   .libmsg.err { color: var(--bad); }
   .libmsg.ok { color: var(--ok); }
+  .chunk {
+    background: #14161f;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-family: monospace;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+  }
+  .chunk .docname { color: var(--accent); font-family: inherit; }
+  .terms { color: var(--muted); font-size: 0.8rem; margin: 8px 0; }
+  .preview {
+    color: var(--muted);
+    font-size: 0.75rem;
+    margin-top: 4px;
+    font-style: italic;
+    word-break: break-word;
+  }
 </style>
 </head>
 <body>
@@ -172,6 +193,14 @@
 </div>
 <div class="libmsg" id="libmsg"></div>
 <div id="doclist"><div class="empty">Inga dokument ännu.</div></div>
+
+<h2 class="section">🧪 Testa sökningen</h2>
+<div class="sub">Skriv en fråga och se exakt vilka utdrag som skulle skickas till modellen. Hittar rätt utdrag här men modellen svarar ändå fel — då är det modellen, inte sökningen.</div>
+<div class="urlrow">
+  <input type="text" id="testinput" placeholder="t.ex. Vad betyder VAd på sidan 212?">
+  <button id="testbtn">Testa</button>
+</div>
+<div id="testresult"></div>
 
 <h2 class="section">⭐ Automatiskt godkännande</h2>
 <div class="sub">Frågor från dessa användarnamn godkänns automatiskt (räknas i panelen men kräver inget klick). Obs: namnet självdeklareras av klienten — använd det som bekvämlighet, inte säkerhetsgräns.</div>
@@ -255,6 +284,12 @@ function libNote(text, isErr) {
   libmsg.className = "libmsg " + (isErr ? "err" : "ok");
 }
 
+function escHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
 function fmtChars(n) {
   return n >= 1000 ? (n / 1000).toFixed(1) + "k tecken" : n + " tecken";
 }
@@ -276,6 +311,7 @@ async function refreshLibrary() {
         <div class="info">
           <div class="name">📄 ${d.name}</div>
           <div class="src">${d.source === "fil" ? "Lokal fil" : `<a href="${d.source}" target="_blank" rel="noopener">${d.source}</a>`} · ${fmtChars(d.chars)} · ${d.date}</div>
+          <div class="preview">Början: ${escHtml((d.preview || "").slice(0, 140))}…</div>
         </div>
         <button class="del" onclick="delDoc('${d.id}')">Ta bort</button>
       </div>
@@ -408,6 +444,37 @@ async function delAuto(name) {
 
 refreshAuto();
 setInterval(refreshAuto, 5000);
+
+const testinput = document.getElementById("testinput");
+const testbtn = document.getElementById("testbtn");
+const testresult = document.getElementById("testresult");
+
+testbtn.addEventListener("click", async () => {
+  const q = testinput.value.trim();
+  if (!q) return;
+  testresult.innerHTML = '<div class="terms">Söker …</div>';
+  try {
+    const r = await fetch("/api/library/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: q }),
+    });
+    const data = await r.json();
+    let html = `<div class="terms">Sökord: ${data.terms.join(", ") || "—"} · ${data.chunks.length} utdrag valda${data.truncated ? " (fler träffar fanns)" : ""}</div>`;
+    html += data.chunks.map(c =>
+      `<div class="chunk"><span class="docname">${escHtml(c.doc)}</span>\n${escHtml(c.text)}</div>`
+    ).join("");
+    if (!data.chunks.length) {
+      html += '<div class="empty">Inga träffar — frågans ord finns inte i dokumenten.</div>';
+    }
+    testresult.innerHTML = html;
+  } catch (err) {
+    testresult.innerHTML = `<div class="terms">Fel: ${err.message}</div>`;
+  }
+});
+testinput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") testbtn.click();
+});
 </script>
 </body>
 </html>

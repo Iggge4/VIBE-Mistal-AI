@@ -38,9 +38,9 @@ LIB_DIR = os.environ.get(
     "VIBE_LIB_DIR",
     os.path.join(os.path.dirname(os.path.abspath(WEB_DIR)), "data", "library"),
 )
-MAX_CONTEXT_CHARS = int(os.environ.get("VIBE_MAX_CONTEXT_CHARS", "12000"))
+MAX_CONTEXT_CHARS = int(os.environ.get("VIBE_MAX_CONTEXT_CHARS", "16000"))
 CHUNK_CHARS = 900
-MAX_CHUNKS = 12
+MAX_CHUNKS = 16
 MAX_DOC_CHARS = 2_000_000
 MAX_PDF_BYTES = 20_000_000
 PDFTOTEXT = os.environ.get("VIBE_PDFTOTEXT") or shutil.which("pdftotext")
@@ -226,9 +226,23 @@ def library_add(name, source, text):
     return entry
 
 
+def _doc_text(doc_id):
+    try:
+        with open(os.path.join(LIB_DIR, doc_id + ".txt")) as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
 def library_list():
     with _lib_lock:
-        return _load_lib_meta()
+        docs = _load_lib_meta()
+    out = []
+    for d in docs:
+        d = dict(d)
+        d["preview"] = _doc_text(d["id"])[:200]
+        out.append(d)
+    return out
 
 
 def library_delete(doc_id):
@@ -496,8 +510,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "content": (
                 "Nedan följer de mest relevanta utdragen ur användarens "
                 "biblioteksdokument (%s)%s, valda automatiskt utifrån frågan. "
-                "Använd dem som kunskapskälla när du svarar. Om svaret inte finns "
-                "i utdragen, säg det ärligt. Svara på användarens språk.\n\n%s"
+                "Läs utdragen nögrant — svaret finns oftast i dem. Använd dem "
+                "som kunskapskälla och citera gärna exakta formuleringar. Säg "
+                "bara att du inte vet om du verkligen inte hittar det. Svara "
+                "på användarens språk.\n\n%s"
                 % (names, note, context)
             ),
         }
@@ -722,6 +738,22 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._lib_add_pdf()
         elif path == "api/library/url":
             self._lib_add_url()
+        elif path == "api/library/test":
+            data = self._read_json_body()
+            question = str((data or {}).get("question", "")) if data else ""
+            docs = [(d, _doc_text(d["id"])) for d in library_list()]
+            terms = _query_terms(question)
+            selected, truncated = _select_chunks(docs, terms)
+            self._send_json(
+                {
+                    "terms": terms,
+                    "truncated": truncated,
+                    "chunks": [
+                        {"doc": meta["name"], "text": chunk[:600]}
+                        for meta, chunk in selected
+                    ],
+                }
+            )
         elif path == "api/autoapprove":
             data = self._read_json_body()
             name = (data or {}).get("name", "").strip() if data else ""
